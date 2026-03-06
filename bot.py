@@ -4084,6 +4084,15 @@ def _build_fallback_avatar(size: int, initials: str):
     box = draw.textbbox((0, 0), text, font=font)
     draw.text(((size - (box[2] - box[0])) / 2, (size - (box[3] - box[1])) / 2), text, fill="#EAF0FF", font=font)
     return img
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in str(name or "").replace("_", " ").split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][:1] + parts[1][:1]).upper()
 def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict], highlight_name: str | None = None, top3_avatars: dict[int, object] | None = None) -> BytesIO | None:
     if importlib.util.find_spec("PIL") is None:
         return None

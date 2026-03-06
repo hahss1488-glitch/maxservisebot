@@ -131,6 +131,10 @@ def init_database():
     shift_columns = {row[1] for row in cur.fetchall()}
     if "shift_target" not in shift_columns:
         cur.execute("ALTER TABLE shifts ADD COLUMN shift_target INTEGER DEFAULT 0")
+    if "pause_started_at" not in shift_columns:
+        cur.execute("ALTER TABLE shifts ADD COLUMN pause_started_at TEXT DEFAULT ''")
+    if "paused_seconds" not in shift_columns:
+        cur.execute("ALTER TABLE shifts ADD COLUMN paused_seconds INTEGER DEFAULT 0")
     
     conn.commit()
     conn.close()
@@ -318,12 +322,77 @@ class DatabaseManager:
     def close_shift(shift_id: int):
         conn = get_connection()
         cur = conn.cursor()
+        row = DatabaseManager.get_shift(shift_id)
+        paused_seconds = int((row or {}).get("paused_seconds") or 0)
+        pause_started_at = (row or {}).get("pause_started_at")
+        if pause_started_at:
+            try:
+                started_dt = datetime.fromisoformat(str(pause_started_at))
+                paused_seconds += max(0, int((now_local() - started_dt).total_seconds()))
+            except Exception:
+                pass
         cur.execute(
-            "UPDATE shifts SET end_time = ?, status = 'closed' WHERE id = ?",
-            (now_local(), shift_id)
+            "UPDATE shifts SET end_time = ?, status = 'closed', pause_started_at = '', paused_seconds = ? WHERE id = ?",
+            (now_local(), paused_seconds, shift_id)
         )
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def toggle_shift_pause(shift_id: int) -> bool:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT pause_started_at, paused_seconds FROM shifts WHERE id = ?", (shift_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        pause_started_at = str(row["pause_started_at"] or "").strip()
+        paused_seconds = int(row["paused_seconds"] or 0)
+        if pause_started_at:
+            try:
+                started_dt = datetime.fromisoformat(pause_started_at)
+                paused_seconds += max(0, int((now_local() - started_dt).total_seconds()))
+            except Exception:
+                pass
+            cur.execute(
+                "UPDATE shifts SET pause_started_at = '', paused_seconds = ? WHERE id = ?",
+                (paused_seconds, shift_id),
+            )
+            conn.commit()
+            conn.close()
+            return False
+
+        cur.execute(
+            "UPDATE shifts SET pause_started_at = ? WHERE id = ?",
+            (now_local().isoformat(), shift_id),
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    @staticmethod
+    def get_shift_effective_hours(shift: Dict) -> float:
+        start_time = shift.get("start_time")
+        end_time = shift.get("end_time") or now_local().isoformat()
+        try:
+            start_dt = datetime.fromisoformat(str(start_time))
+            end_dt = datetime.fromisoformat(str(end_time))
+        except Exception:
+            return 0.01
+
+        total_seconds = max(0.0, (end_dt - start_dt).total_seconds())
+        paused_seconds = int(shift.get("paused_seconds") or 0)
+        pause_started_at = str(shift.get("pause_started_at") or "").strip()
+        if pause_started_at and not shift.get("end_time"):
+            try:
+                pause_dt = datetime.fromisoformat(pause_started_at)
+                paused_seconds += max(0, int((now_local() - pause_dt).total_seconds()))
+            except Exception:
+                pass
+        effective_seconds = max(36.0, total_seconds - max(0, paused_seconds))
+        return effective_seconds / 3600.0
 
     @staticmethod
     def delete_shift(shift_id: int) -> None:
@@ -603,7 +672,7 @@ class DatabaseManager:
         now_str = now_local().strftime("%Y-%m-%d %H:%M:%S")
         cur.execute(
             f"""SELECT s.user_id as user_id,
-            COALESCE(SUM((julianday(COALESCE(s.end_time, ?)) - julianday(s.start_time)) * 24.0), 0) as total_hours
+            COALESCE(SUM(((julianday(COALESCE(s.end_time, ?)) - julianday(s.start_time)) * 24.0) - ((COALESCE(s.paused_seconds,0) + CASE WHEN COALESCE(s.pause_started_at,'') <> '' AND s.end_time IS NULL THEN (julianday(?) - julianday(s.pause_started_at)) * 86400 ELSE 0 END) / 3600.0)), 0) as total_hours
             FROM shifts s
             WHERE s.user_id IN ({placeholders})
               AND EXISTS (
@@ -612,7 +681,7 @@ class DatabaseManager:
                   AND date(c.created_at, '+3 hours') BETWEEN date(?) AND date(?)
               )
             GROUP BY s.user_id""",
-            [now_str, *user_ids, start_date, end_date]
+            [now_str, now_str, *user_ids, start_date, end_date]
         )
         hours_rows = cur.fetchall()
         conn.close()
@@ -643,6 +712,7 @@ class DatabaseManager:
             row["total_hours"] = round(total_hours, 1)
             row["progress_pct"] = progress_pct
             row["run_rate"] = run_rate
+            row["shifts_count"] = int(row.get("shift_count") or 0)
         return users
 
     @staticmethod

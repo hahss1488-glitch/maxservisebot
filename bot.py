@@ -298,10 +298,12 @@ def resolve_user_access(telegram_id: int, context: CallbackContext | None = None
 
 
 def main_menu_for_db_user(db_user: dict | None, subscription_active: bool | None = None) -> ReplyKeyboardMarkup:
-    has_active_shift = bool(db_user and DatabaseManager.get_active_shift(db_user['id']))
+    active_shift = DatabaseManager.get_active_shift(db_user['id']) if db_user else None
+    has_active_shift = bool(active_shift)
+    shift_paused = bool(active_shift and str(active_shift.get("pause_started_at") or "").strip())
     if subscription_active is None:
         subscription_active = bool(db_user and is_subscription_active(db_user))
-    return create_main_reply_keyboard(has_active_shift, bool(subscription_active))
+    return create_main_reply_keyboard(has_active_shift, bool(subscription_active), shift_paused)
 
 
 def build_settings_keyboard(db_user: dict | None, is_admin: bool) -> InlineKeyboardMarkup:
@@ -579,6 +581,8 @@ def build_decade_goal_hint(db_user: dict, year: int, month: int) -> str:
 
 MENU_SHIFT_OPEN = "🟢 Открыть смену"
 MENU_SHIFT_CLOSE = "🔚 Закрыть смену"
+MENU_SHIFT_LUNCH = "🍱 Уйти на обед"
+MENU_SHIFT_RESUME = "✅ Вернуться с обеда"
 MENU_ADD_CAR = "🚗 Добавить машину"
 MENU_CURRENT_SHIFT = "📊 Дашборд"
 MENU_SETTINGS = "🧰 Инструменты"
@@ -598,7 +602,7 @@ TOOLS_ADMIN = "🛡️ Админ панель"
 TOOLS_BACK = "🔙 Назад"
 
 
-def create_main_reply_keyboard(has_active_shift: bool = False, subscription_active: bool = True) -> ReplyKeyboardMarkup:
+def create_main_reply_keyboard(has_active_shift: bool = False, subscription_active: bool = True, shift_paused: bool = False) -> ReplyKeyboardMarkup:
     """Главное меню под полем ввода"""
     keyboard = []
 
@@ -612,7 +616,11 @@ def create_main_reply_keyboard(has_active_shift: bool = False, subscription_acti
         )
 
     shift_button = MENU_SHIFT_CLOSE if has_active_shift else MENU_SHIFT_OPEN
-    keyboard.append([KeyboardButton(MENU_ADD_CAR), KeyboardButton(shift_button)])
+    if has_active_shift:
+        lunch_button = MENU_SHIFT_RESUME if shift_paused else MENU_SHIFT_LUNCH
+        keyboard.append([KeyboardButton(MENU_ADD_CAR), KeyboardButton(lunch_button), KeyboardButton(shift_button)])
+    else:
+        keyboard.append([KeyboardButton(MENU_ADD_CAR), KeyboardButton(shift_button)])
     keyboard.append([KeyboardButton(MENU_CURRENT_SHIFT), KeyboardButton(MENU_LEADERBOARD)])
     keyboard.append([KeyboardButton(MENU_FAQ), KeyboardButton(MENU_ACCOUNT)])
     keyboard.append([KeyboardButton(MENU_SETTINGS)])
@@ -771,8 +779,7 @@ def calculate_percent(value: int, total: int) -> int:
 
 def build_shift_metrics(shift: dict, cars: list[dict], total: int) -> dict:
     start_time = parse_datetime(shift.get("start_time"))
-    end_time = parse_datetime(shift.get("end_time")) or now_local()
-    hours = max((end_time - start_time).total_seconds() / 3600, 0.01) if start_time else 0.01
+    hours = DatabaseManager.get_shift_effective_hours(shift)
     rate_hours = max(hours, 1.0)
     cars_count = len(cars)
     avg_check = int(total / cars_count) if cars_count else 0
@@ -1057,9 +1064,11 @@ def _build_open_dashboard_payload(user_id: int, shift: dict, cars: list[dict], t
             ("Осталось смен", str(int(p.get("work_units_left") or 0)), TOKENS["TEXT_PRIMARY"]),
             ("Нужно в смену", format_money_glass(int(p.get("shift_target_now") or 0)), TOKENS["TEXT_PRIMARY"]),
             ("Средний план", format_money_glass(int(p.get("avg_per_shift") or 0)), TOKENS["TEXT_PRIMARY"]),
-            ("Дельта", f"{delta:+,}".replace(",", " ") + " ₽", delta_color),
+            ("Отклонение от плана", f"{delta:+,}".replace(",", " ") + " ₽", delta_color),
             ("Темп", pace_text, pace_color),
         ],
+        "plan_deviation_label": "Опережение плана" if pace_delta > 0 else ("Отставание от плана" if pace_delta < 0 else "Отклонение от плана"),
+        "updated_at": now_local(),
         "mini": [
             f"Смен: {shifts_done}",
             f"Машин: {cars_done}",
@@ -1094,9 +1103,11 @@ def _build_closed_dashboard_payload(user_id: int) -> dict:
             ("Осталось смен", str(int(p.get("work_units_left") or 0)), TOKENS["TEXT_PRIMARY"]),
             ("Нужно в смену", format_money_glass(int(p.get("shift_target_now") or 0)), TOKENS["TEXT_PRIMARY"]),
             ("Средний план", format_money_glass(int(p.get("avg_per_shift") or 0)), TOKENS["TEXT_PRIMARY"]),
-            ("Опережение / отставание", f"{delta:+,}".replace(",", " ") + " ₽", TOKENS["POSITIVE"] if delta >= 0 else TOKENS["NEGATIVE"]),
+            ("Отклонение от плана", f"{delta:+,}".replace(",", " ") + " ₽", TOKENS["POSITIVE"] if delta >= 0 else TOKENS["NEGATIVE"]),
             ("Темп к плану", pace_text, pace_color),
         ],
+        "plan_deviation_label": "Опережение плана" if pace_delta > 0 else ("Отставание от плана" if pace_delta < 0 else "Отклонение от плана"),
+        "updated_at": now_local(),
         "mini": [
             f"Смен: {shifts_done}",
             f"Машин: {cars_done}",
@@ -1717,6 +1728,8 @@ async def handle_message(update: Update, context: CallbackContext):
         MENU_ADD_CAR,
         MENU_SHIFT_OPEN,
         MENU_SHIFT_CLOSE,
+        MENU_SHIFT_LUNCH,
+        MENU_SHIFT_RESUME,
         MENU_CURRENT_SHIFT,
         MENU_SETTINGS,
         MENU_LEADERBOARD,
@@ -1924,6 +1937,8 @@ async def handle_message(update: Update, context: CallbackContext):
         MENU_ADD_CAR,
         MENU_SHIFT_OPEN,
         MENU_SHIFT_CLOSE,
+        MENU_SHIFT_LUNCH,
+        MENU_SHIFT_RESUME,
         MENU_CURRENT_SHIFT,
         MENU_SETTINGS,
         MENU_LEADERBOARD,
@@ -1935,6 +1950,8 @@ async def handle_message(update: Update, context: CallbackContext):
             await add_car_message(update, context)
         elif text in {MENU_SHIFT_OPEN, MENU_SHIFT_CLOSE}:
             await toggle_shift_message(update, context)
+        elif text in {MENU_SHIFT_LUNCH, MENU_SHIFT_RESUME}:
+            await toggle_lunch_message(update, context)
         elif text == MENU_CURRENT_SHIFT:
             await current_shift_message(update, context)
         elif text == MENU_SETTINGS:
@@ -4321,7 +4338,7 @@ def build_leaderboard_text(decade_title: str, decade_leaders: list[dict]) -> str
     lines = []
     for place, leader in enumerate(decade_leaders, start=1):
         total = format_money(int(leader.get("total_amount", 0)))
-        shifts = int(leader.get("shift_count", 0))
+        shifts = int(leader.get("shifts_count", leader.get("shift_count", 0)) or 0)
         lines.append(f"{place}. {leader.get('name', '—')} — {total} ({shifts} смен)")
     return "\n".join(header + [""] + lines)
 
@@ -4528,7 +4545,7 @@ def _fit_name_lines(draw, text: str, max_w: int, max_lines: int, base_size: int,
 def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict], highlight_name: str | None = None, top3_avatars: dict[int, object] | None = None) -> BytesIO | None:
     if importlib.util.find_spec("PIL") is None:
         return None
-    return render_leaderboard_image_bytes(decade_title, decade_leaders, highlight_name=highlight_name, top3_avatars=top3_avatars)
+    return render_leaderboard_image_bytes(decade_title, decade_leaders, highlight_name=highlight_name, top3_avatars=top3_avatars, updated_at=now_local())
 
     from PIL import ImageDraw
 
@@ -4918,6 +4935,25 @@ async def toggle_shift_message(update: Update, context: CallbackContext):
         await close_shift_message(update, context)
     else:
         await open_shift_message(update, context)
+
+
+async def toggle_lunch_message(update: Update, context: CallbackContext):
+    db_user = DatabaseManager.get_user(update.effective_user.id)
+    if not db_user:
+        await update.message.reply_text("❌ Пользователь не найден. Напиши /start")
+        return
+
+    active_shift = DatabaseManager.get_active_shift(db_user['id'])
+    if not active_shift:
+        await update.message.reply_text("📭 Нет активной смены.", reply_markup=create_main_reply_keyboard(False))
+        return
+
+    paused_now = DatabaseManager.toggle_shift_pause(int(active_shift['id']))
+    refreshed = DatabaseManager.get_active_shift(db_user['id'])
+    if paused_now:
+        await update.message.reply_text("🍱 Смена поставлена на паузу (обед).", reply_markup=create_main_reply_keyboard(True, True, True))
+    else:
+        await update.message.reply_text("✅ Пауза завершена. Смена снова активна.", reply_markup=create_main_reply_keyboard(True, True, bool(refreshed and str(refreshed.get('pause_started_at') or '').strip())))
 
 
 async def open_shift_message(update: Update, context: CallbackContext):

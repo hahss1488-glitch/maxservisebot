@@ -4326,21 +4326,22 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
 
 def render_background(image, draw):
     width, height = image.size
-    top = (84, 121, 159)
-    bottom = (192, 206, 222)
+    top = (70, 90, 118)
+    bottom = (167, 184, 204)
     for y in range(height):
         t = y / max(height - 1, 1)
-        draw.line((0, y, width, y), fill=(int(top[0] + (bottom[0] - top[0]) * t), int(top[1] + (bottom[1] - top[1]) * t), int(top[2] + (bottom[2] - top[2]) * t), 255))
+        fill = (
+            int(top[0] + (bottom[0] - top[0]) * t),
+            int(top[1] + (bottom[1] - top[1]) * t),
+            int(top[2] + (bottom[2] - top[2]) * t),
+            255,
+        )
+        draw.line((0, y, width, y), fill=fill)
 
 
 def render_glass_panel(draw, x1, y1, x2, y2):
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=24, fill=(255, 255, 255, 88), outline=(255, 255, 255, 130), width=1)
-
-
-def render_table_header(draw, header_font, col_x, y, row_h, days):
-    headers = ["Место", "Сотрудник", *[str(day) for day in days], "Итог"]
-    for i, text in enumerate(headers):
-        draw.text((col_x[i] + 8, y + (row_h - 22) // 2), text, fill=(28, 39, 58, 255), font=header_font)
+    draw.rounded_rectangle((x1 + 2, y1 + 6, x2 + 2, y2 + 10), radius=24, fill=(18, 25, 40, 45))
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=24, fill=(255, 255, 255, 76), outline=(255, 255, 255, 126), width=1)
 
 
 def render_heat_cell(draw, x1, y1, x2, y2, value):
@@ -4358,7 +4359,7 @@ def render_heat_cell(draw, x1, y1, x2, y2, value):
         c = (150, 39, 43, 120)
     else:
         c = (110, 20, 42, 120)
-    draw.rounded_rectangle((x1 + 2, y1 + 2, x2 - 2, y2 - 2), radius=10, fill=c)
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=14, fill=c)
 
 
 def render_avatar(base_image, avatar_image, x, y, size, initials):
@@ -4369,28 +4370,56 @@ def render_avatar(base_image, avatar_image, x, y, size, initials):
     base_image.paste(avatar, (x, y), mask)
 
 
-def render_total_column(draw, font, bold_font, x1, y1, x2, y2, total):
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=10, fill=(255, 255, 255, 70))
-    draw.text((x1 + 8, y1 + 12), str(int(total or 0)), fill=(27, 34, 52, 255), font=bold_font or font)
+def render_header(draw, title_font, sub_font, x, y, decade_title):
+    draw.text((x, y), f"📊 Рейтинг сотрудников · {decade_title}", fill=(244, 247, 255, 255), font=title_font)
+    draw.text((x, y + 40), "Карточный leaderboard по сменам текущей декады", fill=(230, 238, 252, 220), font=sub_font)
 
 
-def render_user_row(base_image, draw, font, bold_font, col_x, y, row_h, place, row, days, avatars):
-    draw.rounded_rectangle((col_x[0], y, col_x[-1], y + row_h - 2), radius=12, fill=(255, 255, 255, 44))
-    draw.text((col_x[0] + 8, y + 12), f"#{place}", fill=(29, 36, 56, 255), font=font)
+def render_shift_cells(draw, font, x, y, max_width, day_values, days):
+    cursor_x = x
+    cursor_y = y
+    row_h = 34
+    gap = 8
+    for day in days:
+        val = day_values.get(day)
+        text = str(val) if val is not None else "—"
+        text_w = draw.textbbox((0, 0), text, font=font)[2]
+        pill_w = max(50, text_w + 20)
+        if cursor_x + pill_w > x + max_width:
+            cursor_x = x
+            cursor_y += row_h + gap
+        render_heat_cell(draw, cursor_x, cursor_y, cursor_x + pill_w, cursor_y + row_h, val)
+        draw.text((cursor_x + (pill_w - text_w) / 2, cursor_y + 7), text, fill=(248, 250, 255, 255), font=font)
+        cursor_x += pill_w + gap
+    return cursor_y + row_h
+
+
+def render_total(draw, font, bold_font, x, y, total):
+    label = "Итого:"
+    value = format_money(int(total or 0))
+    draw.text((x, y), label, fill=(38, 48, 70, 230), font=font)
+    draw.text((x + 78, y - 2), value, fill=(20, 28, 46, 255), font=bold_font)
+
+
+def render_employee_card(base_image, draw, fonts, x1, y1, x2, y2, place, row, days, avatars):
+    font, small_font, bold_font = fonts
+    top_borders = {
+        1: (211, 174, 94, 220),
+        2: (176, 184, 198, 220),
+        3: (176, 127, 92, 220),
+    }
+    outline = top_borders.get(place, (255, 255, 255, 120))
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=20, fill=(255, 255, 255, 84), outline=outline, width=2 if place <= 3 else 1)
+
     name = str(row.get("name", "—"))
-    draw.text((col_x[1] + 58, y + 12), f"#{place} {name}", fill=(17, 23, 40, 255), font=font)
     avatar = avatars.get(int(row.get("telegram_id") or 0))
-    render_avatar(base_image, avatar, col_x[1] + 8, y + 8, 34, _initials(name))
+    avatar_size = 42
+    render_avatar(base_image, avatar, x1 + 14, y1 + 14, avatar_size, _initials(name))
+    draw.text((x1 + 70, y1 + 16), f"#{place} {name}", fill=(26, 34, 54, 255), font=font)
 
     day_values = row.get("daily_amounts") or {}
-    for idx, day in enumerate(days):
-        x1 = col_x[2 + idx]
-        x2 = col_x[3 + idx]
-        val = day_values.get(day)
-        render_heat_cell(draw, x1, y + 6, x2 - 4, y + row_h - 8, val)
-        draw.text((x1 + 8, y + 12), str(val) if val is not None else "—", fill=(24, 30, 48, 255), font=font)
-
-    render_total_column(draw, font, bold_font, col_x[-2], y + 6, col_x[-1] - 4, y + row_h - 8, int(row.get("total_amount", 0)))
+    cells_bottom = render_shift_cells(draw, small_font, x1 + 14, y1 + 66, (x2 - x1) - 28, day_values, days)
+    render_total(draw, small_font, bold_font, x1 + 14, cells_bottom + 10, int(row.get("total_amount", 0)))
 
 
 def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict], highlight_name: str | None = None, top3_avatars: dict[int, object] | None = None) -> BytesIO | None:
@@ -4405,18 +4434,14 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
     if not day_set:
         day_set = list(range(1, 11))
 
-    row_h = 52
-    table_header_h = 56
-    header_h = 92
-    padding = 24
+    header_h = 96
+    card_h = 174
+    card_gap = 14
+    padding = 26
     users_count = len(decade_leaders)
-    height = header_h + table_header_h + row_h * users_count + padding * 2
+    height = header_h + users_count * card_h + max(users_count - 1, 0) * card_gap + padding * 2
 
-    col_widths = [78, 270] + [62] * len(day_set) + [96]
-    width = sum(col_widths) + padding * 2
-    col_x = [padding]
-    for w in col_widths:
-        col_x.append(col_x[-1] + w)
+    width = 1160
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 255))
     draw = ImageDraw.Draw(img, "RGBA")
@@ -4424,25 +4449,35 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
     img = img.filter(ImageFilter.GaussianBlur(0.6))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    title_font = _load_rank_font(ImageFont, 30)
-    head_font = _load_rank_font(ImageFont, 22)
-    row_font = _load_rank_font(ImageFont, 18)
-    bold_font = _load_rank_font(ImageFont, 19)
+    title_font = _load_rank_font(ImageFont, 34)
+    sub_font = _load_rank_font(ImageFont, 18)
+    card_font = _load_rank_font(ImageFont, 28)
+    card_small_font = _load_rank_font(ImageFont, 20)
+    total_bold_font = _load_rank_font(ImageFont, 24)
 
-    draw.text((padding, 20), f"🏆 Рейтинг сотрудников • {decade_title}", fill=(245, 248, 255, 255), font=title_font)
+    render_header(draw, title_font, sub_font, padding + 6, 20, decade_title)
 
-    panel_y1 = header_h - 6
+    panel_y1 = header_h
     panel_y2 = height - padding
     render_glass_panel(draw, padding, panel_y1, width - padding, panel_y2)
 
-    header_y = panel_y1 + 10
-    render_table_header(draw, head_font, col_x, header_y, table_header_h, day_set)
-
-    y = header_y + table_header_h
+    y = panel_y1 + 16
     avatars = top3_avatars or {}
     for place, row in enumerate(decade_leaders, start=1):
-        render_user_row(img, draw, row_font, bold_font, col_x, y, row_h, place, row, day_set, avatars)
-        y += row_h
+        render_employee_card(
+            img,
+            draw,
+            (card_font, card_small_font, total_bold_font),
+            padding + 14,
+            y,
+            width - padding - 14,
+            y + card_h,
+            place,
+            row,
+            day_set,
+            avatars,
+        )
+        y += card_h + card_gap
 
     out = BytesIO()
     out.name = "leaderboard.png"

@@ -4326,8 +4326,8 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
 
 def render_background(image, draw):
     width, height = image.size
-    top = (70, 90, 118)
-    bottom = (167, 184, 204)
+    top = (34, 42, 61)
+    bottom = (70, 89, 120)
     for y in range(height):
         t = y / max(height - 1, 1)
         fill = (
@@ -4339,87 +4339,117 @@ def render_background(image, draw):
         draw.line((0, y, width, y), fill=fill)
 
 
-def render_glass_panel(draw, x1, y1, x2, y2):
-    draw.rounded_rectangle((x1 + 2, y1 + 6, x2 + 2, y2 + 10), radius=24, fill=(18, 25, 40, 45))
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=24, fill=(255, 255, 255, 76), outline=(255, 255, 255, 126), width=1)
+def render_panel(draw, x1, y1, x2, y2):
+    draw.rounded_rectangle((x1 + 2, y1 + 8, x2 + 2, y2 + 10), radius=24, fill=(8, 12, 20, 70))
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=24, fill=(255, 255, 255, 68), outline=(255, 255, 255, 120), width=1)
 
 
-def render_heat_cell(draw, x1, y1, x2, y2, value):
+def render_header(draw, title_font, sub_font, x, y, decade_title):
+    draw.text((x, y), f"🏆 Рейтинг сотрудников • {decade_title}", fill=(245, 248, 255, 255), font=title_font)
+    draw.text((x, y + 42), "Карточный leaderboard по сменам текущей декады", fill=(221, 232, 249, 230), font=sub_font)
+
+
+def _income_color(value: int | None) -> tuple[int, int, int, int]:
     if value is None:
-        return
+        return (132, 147, 173, 95)
     if value >= 5000:
-        c = (70, 170, 90, 120)
-    elif value >= 4000:
-        c = (223, 193, 65, 120)
-    elif value >= 3000:
-        c = (220, 137, 57, 120)
-    elif value >= 2000:
-        c = (210, 74, 73, 120)
-    elif value >= 1000:
-        c = (150, 39, 43, 120)
-    else:
-        c = (110, 20, 42, 120)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=14, fill=c)
+        return (70, 170, 90, 145)
+    if value >= 4000:
+        return (223, 193, 65, 145)
+    if value >= 3000:
+        return (220, 137, 57, 145)
+    if value >= 2000:
+        return (210, 74, 73, 145)
+    if value >= 1000:
+        return (150, 39, 43, 145)
+    return (110, 20, 42, 145)
 
 
 def render_avatar(base_image, avatar_image, x, y, size, initials):
     from PIL import Image, ImageDraw
-    avatar = (avatar_image.resize((size, size)).convert("RGBA") if avatar_image is not None else _build_fallback_avatar(size, initials))
+
+    avatar = avatar_image.resize((size, size)).convert("RGBA") if avatar_image is not None else _build_fallback_avatar(size, initials)
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
     base_image.paste(avatar, (x, y), mask)
 
 
-def render_header(draw, title_font, sub_font, x, y, decade_title):
-    draw.text((x, y), f"📊 Рейтинг сотрудников · {decade_title}", fill=(244, 247, 255, 255), font=title_font)
-    draw.text((x, y + 40), "Карточный leaderboard по сменам текущей декады", fill=(230, 238, 252, 220), font=sub_font)
-
-
-def render_shift_cells(draw, font, x, y, max_width, day_values, days):
+def render_money_cells(draw, font, x, y, max_width, day_values, days, avg_per_hour):
     cursor_x = x
     cursor_y = y
-    row_h = 34
+    row_h = 32
     gap = 8
     for day in days:
         val = day_values.get(day)
-        text = str(val) if val is not None else "—"
-        text_w = draw.textbbox((0, 0), text, font=font)[2]
-        pill_w = max(50, text_w + 20)
+        txt = str(val) if val is not None else "—"
+        tw = draw.textbbox((0, 0), txt, font=font)[2]
+        pill_w = max(48, tw + 22)
         if cursor_x + pill_w > x + max_width:
             cursor_x = x
             cursor_y += row_h + gap
-        render_heat_cell(draw, cursor_x, cursor_y, cursor_x + pill_w, cursor_y + row_h, val)
-        draw.text((cursor_x + (pill_w - text_w) / 2, cursor_y + 7), text, fill=(248, 250, 255, 255), font=font)
+        draw.rounded_rectangle((cursor_x, cursor_y, cursor_x + pill_w, cursor_y + row_h), radius=14, fill=_income_color(val))
+        draw.text((cursor_x + (pill_w - tw) / 2, cursor_y + 6), txt, fill=(248, 250, 255, 255), font=font)
         cursor_x += pill_w + gap
+
+    avg_txt = f"⚡/ч {format_money(int(avg_per_hour or 0))}"
+    avg_w = draw.textbbox((0, 0), avg_txt, font=font)[2] + 24
+    if cursor_x + avg_w > x + max_width:
+        cursor_x = x
+        cursor_y += row_h + gap
+    draw.rounded_rectangle((cursor_x, cursor_y, cursor_x + avg_w, cursor_y + row_h), radius=14, fill=(56, 96, 185, 138))
+    draw.text((cursor_x + 12, cursor_y + 6), avg_txt, fill=(240, 247, 255, 255), font=font)
     return cursor_y + row_h
 
 
-def render_total(draw, font, bold_font, x, y, total):
-    label = "Итого:"
-    value = format_money(int(total or 0))
-    draw.text((x, y), label, fill=(38, 48, 70, 230), font=font)
-    draw.text((x + 78, y - 2), value, fill=(20, 28, 46, 255), font=bold_font)
+def render_total_column(draw, label_font, total_font, x, y, total_amount):
+    draw.text((x, y), "Итог за декаду:", fill=(31, 40, 61, 235), font=label_font)
+    draw.text((x + 170, y - 2), format_money(int(total_amount or 0)), fill=(15, 22, 38, 255), font=total_font)
 
 
-def render_employee_card(base_image, draw, fonts, x1, y1, x2, y2, place, row, days, avatars):
-    font, small_font, bold_font = fonts
-    top_borders = {
-        1: (211, 174, 94, 220),
-        2: (176, 184, 198, 220),
-        3: (176, 127, 92, 220),
+def render_progress(draw, x, y, width, progress_pct, total_amount, decade_goal, font):
+    pct = max(0, min(int(progress_pct or 0), 200))
+    draw.rounded_rectangle((x, y, x + width, y + 14), radius=7, fill=(33, 45, 71, 95))
+    fill_w = int(width * min(pct, 100) / 100)
+    fill_color = (84, 204, 126, 180) if pct >= 100 else (95, 160, 255, 170)
+    draw.rounded_rectangle((x, y, x + fill_w, y + 14), radius=7, fill=fill_color)
+    if decade_goal > 0:
+        left = max(0, int(decade_goal) - int(total_amount or 0))
+        info = f"Прогресс: {pct}%  •  Осталось: {format_money(left)}"
+    else:
+        info = f"Прогресс: {pct}%  •  Цель декады не задана"
+    draw.text((x, y + 18), info, fill=(233, 241, 255, 238), font=font)
+
+
+def render_employee_row(base_image, draw, fonts, x1, y1, x2, y2, place, row, days, avatars):
+    name_font, cell_font, total_font, tiny_font = fonts
+    border_by_place = {
+        1: (228, 190, 92, 230),
+        2: (188, 196, 210, 228),
+        3: (196, 140, 96, 228),
     }
-    outline = top_borders.get(place, (255, 255, 255, 120))
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=20, fill=(255, 255, 255, 84), outline=outline, width=2 if place <= 3 else 1)
+    outline = border_by_place.get(place, (255, 255, 255, 112))
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=20, fill=(255, 255, 255, 82), outline=outline, width=2 if place <= 3 else 1)
 
     name = str(row.get("name", "—"))
+    display_name = name if len(name) <= 22 else (name[:21] + "…")
     avatar = avatars.get(int(row.get("telegram_id") or 0))
-    avatar_size = 42
-    render_avatar(base_image, avatar, x1 + 14, y1 + 14, avatar_size, _initials(name))
-    draw.text((x1 + 70, y1 + 16), f"#{place} {name}", fill=(26, 34, 54, 255), font=font)
+    render_avatar(base_image, avatar, x1 + 14, y1 + 14, 44, _initials(name))
+    draw.text((x1 + 70, y1 + 18), f"#{place} {display_name}", fill=(25, 34, 54, 255), font=name_font)
 
     day_values = row.get("daily_amounts") or {}
-    cells_bottom = render_shift_cells(draw, small_font, x1 + 14, y1 + 66, (x2 - x1) - 28, day_values, days)
-    render_total(draw, small_font, bold_font, x1 + 14, cells_bottom + 10, int(row.get("total_amount", 0)))
+    cells_bottom = render_money_cells(draw, cell_font, x1 + 14, y1 + 66, (x2 - x1) - 28, day_values, days, int(row.get("avg_per_hour") or 0))
+
+    render_total_column(draw, cell_font, total_font, x1 + 14, cells_bottom + 10, int(row.get("total_amount") or 0))
+    render_progress(
+        draw,
+        x1 + 14,
+        cells_bottom + 44,
+        (x2 - x1) - 28,
+        int(row.get("progress_pct") or 0),
+        int(row.get("total_amount") or 0),
+        int(row.get("decade_goal") or 0),
+        tiny_font,
+    )
 
 
 def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict], highlight_name: str | None = None, top3_avatars: dict[int, object] | None = None) -> BytesIO | None:
@@ -4434,50 +4464,50 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
     if not day_set:
         day_set = list(range(1, 11))
 
-    header_h = 96
-    card_h = 174
-    card_gap = 14
+    header_h = 104
+    row_h = 212
+    row_gap = 14
     padding = 26
+    width = 1240
     users_count = len(decade_leaders)
-    height = header_h + users_count * card_h + max(users_count - 1, 0) * card_gap + padding * 2
-
-    width = 1160
+    height = header_h + users_count * row_h + max(users_count - 1, 0) * row_gap + padding * 2
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 255))
     draw = ImageDraw.Draw(img, "RGBA")
     render_background(img, draw)
-    img = img.filter(ImageFilter.GaussianBlur(0.6))
+    img = img.filter(ImageFilter.GaussianBlur(0.8))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    title_font = _load_rank_font(ImageFont, 34)
+    title_font = _load_rank_font(ImageFont, 36)
     sub_font = _load_rank_font(ImageFont, 18)
-    card_font = _load_rank_font(ImageFont, 28)
-    card_small_font = _load_rank_font(ImageFont, 20)
-    total_bold_font = _load_rank_font(ImageFont, 24)
+    name_font = _load_rank_font(ImageFont, 30)
+    cell_font = _load_rank_font(ImageFont, 20)
+    total_font = _load_rank_font(ImageFont, 26)
+    tiny_font = _load_rank_font(ImageFont, 17)
 
-    render_header(draw, title_font, sub_font, padding + 6, 20, decade_title)
+    render_header(draw, title_font, sub_font, padding + 6, 22, decade_title)
 
     panel_y1 = header_h
     panel_y2 = height - padding
-    render_glass_panel(draw, padding, panel_y1, width - padding, panel_y2)
+    render_panel(draw, padding, panel_y1, width - padding, panel_y2)
 
     y = panel_y1 + 16
     avatars = top3_avatars or {}
     for place, row in enumerate(decade_leaders, start=1):
-        render_employee_card(
+        render_employee_row(
             img,
             draw,
-            (card_font, card_small_font, total_bold_font),
-            padding + 14,
+            (name_font, cell_font, total_font, tiny_font),
+            padding + 12,
             y,
-            width - padding - 14,
-            y + card_h,
+            width - padding - 12,
+            y + row_h,
             place,
             row,
             day_set,
             avatars,
         )
-        y += card_h + card_gap
+        y += row_h + row_gap
 
     out = BytesIO()
     out.name = "leaderboard.png"

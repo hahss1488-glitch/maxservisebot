@@ -554,7 +554,8 @@ class DatabaseManager:
         cur.execute(
             """SELECT u.id as user_id, u.name, u.telegram_id,
             COALESCE(SUM(c.total_amount), 0) as total_amount,
-            COUNT(DISTINCT s.id) as shift_count
+            COUNT(DISTINCT s.id) as shift_count,
+            COALESCE(us.decade_goal, 0) as decade_goal
             FROM users u
             JOIN shifts s ON s.user_id = u.id
             JOIN cars c ON c.shift_id = s.id
@@ -586,6 +587,22 @@ class DatabaseManager:
             [*user_ids, start_date, end_date]
         )
         per_day = cur.fetchall()
+
+        now_str = now_local().strftime("%Y-%m-%d %H:%M:%S")
+        cur.execute(
+            f"""SELECT s.user_id as user_id,
+            COALESCE(SUM((julianday(COALESCE(s.end_time, ?)) - julianday(s.start_time)) * 24.0), 0) as total_hours
+            FROM shifts s
+            WHERE s.user_id IN ({placeholders})
+              AND EXISTS (
+                SELECT 1 FROM cars c
+                WHERE c.shift_id = s.id
+                  AND date(c.created_at, '+3 hours') BETWEEN date(?) AND date(?)
+              )
+            GROUP BY s.user_id""",
+            [now_str, *user_ids, start_date, end_date]
+        )
+        hours_rows = cur.fetchall()
         conn.close()
 
         day_map: Dict[int, Dict[int, int]] = {}
@@ -593,8 +610,22 @@ class DatabaseManager:
             uid = int(row["user_id"])
             day_map.setdefault(uid, {})[int(row["day"])] = int(row["total_amount"] or 0)
 
+        hours_map: Dict[int, float] = {}
+        for row in hours_rows:
+            uid = int(row["user_id"])
+            hours_map[uid] = max(float(row["total_hours"] or 0.0), 0.0)
+
         for row in users:
-            row["daily_amounts"] = day_map.get(int(row["user_id"]), {})
+            uid = int(row["user_id"])
+            total_amount = int(row.get("total_amount") or 0)
+            total_hours = float(hours_map.get(uid, 0.0))
+            avg_per_hour = int(total_amount / total_hours) if total_hours > 0 else 0
+            decade_goal = int(row.get("decade_goal") or 0)
+            progress_pct = 100 if decade_goal <= 0 else min(200, int((total_amount * 100) / max(decade_goal, 1)))
+            row["daily_amounts"] = day_map.get(uid, {})
+            row["avg_per_hour"] = avg_per_hour
+            row["total_hours"] = round(total_hours, 1)
+            row["progress_pct"] = progress_pct
         return users
 
     @staticmethod

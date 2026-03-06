@@ -556,6 +556,10 @@ class DatabaseManager:
 
         start_date = f"{year:04d}-{month:02d}-{start_day:02d}"
         end_date = f"{year:04d}-{month:02d}-{end_day:02d}"
+        total_days = max(end_day - start_day + 1, 1)
+        current_day = now_local().day if (now_local().year == year and now_local().month == month) else end_day
+        elapsed_days = min(max(current_day - start_day + 1, 0), total_days)
+        elapsed_ratio = (elapsed_days / total_days) if total_days > 0 else 1.0
 
         conn = get_connection()
         cur = conn.cursor()
@@ -630,10 +634,15 @@ class DatabaseManager:
             avg_per_hour = int(total_amount / total_hours) if total_hours > 0 else 0
             decade_goal = int(row.get("decade_goal") or 0)
             progress_pct = 100 if decade_goal <= 0 else min(200, int((total_amount * 100) / max(decade_goal, 1)))
+            run_rate = None
+            if decade_goal > 0 and elapsed_ratio > 0:
+                expected_now = max(1.0, decade_goal * elapsed_ratio)
+                run_rate = max(0.0, min(2.0, total_amount / expected_now))
             row["daily_amounts"] = day_map.get(uid, {})
             row["avg_per_hour"] = avg_per_hour
             row["total_hours"] = round(total_hours, 1)
             row["progress_pct"] = progress_pct
+            row["run_rate"] = run_rate
         return users
 
     @staticmethod

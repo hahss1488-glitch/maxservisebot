@@ -4442,9 +4442,9 @@ def _gradient_rect(draw, box, c_top, c_mid, c_bot, radius=16, outline=None, widt
 
 
 def render_table_header(draw, font, x, y, cols, gap):
-    labels = ["МЕСТО", "СОТРУДНИК", "СРЕДНЕЕ В ЧАС ₽/ч", "ИТОГ"]
+    labels = ["МЕСТО", "СОТРУДНИК", "СРЕДНЕЕ В ЧАС ₽/ч", "RUN RATE", "ИТОГ"]
     x0 = x
-    widths = [cols[0] + cols[1], cols[2], cols[3] + cols[4], cols[5]]
+    widths = cols
     for label, w in zip(labels, widths):
         _gradient_rect(
             draw,
@@ -4490,7 +4490,7 @@ def render_row_panel(base_image, draw, box, place):
     draw.rounded_rectangle((x1 + 30, (y1 + y2) // 2 - 2, x2 - 30, (y1 + y2) // 2 + 2), radius=1, fill=(255, 217, 138, 100))
 
 
-def render_rank(draw, font, x, y, w, h, place):
+def render_rank_block(draw, font, x, y, w, h, place):
     color = {1: (255, 217, 138, 255), 2: (217, 217, 217, 255), 3: (194, 122, 58, 255)}.get(place, (255, 244, 214, 245))
     txt = f"#{place}"
     tb = draw.textbbox((0, 0), txt, font=font)
@@ -4520,30 +4520,35 @@ def render_avatar(base_image, avatar_image, x, y, size, initials, border_color, 
     base_image.alpha_composite(ol)
 
 
-def render_name(draw, font, x, y, max_w, name):
+def render_employee_block(draw, font, x, y, max_w, name):
     text = (name or "—").strip() or "—"
     while len(text) > 1 and draw.textbbox((0, 0), text, font=font)[2] > max_w:
         text = text[:-2] + "…"
     draw.text((x, y), text, fill=(255, 244, 214, 255), font=font)
 
 
-def render_avg_hour(draw, font, x, y, w, h, avg_text):
+def render_avg_hour_block(draw, font, x, y, w, h, avg_text):
     _gradient_rect(draw, (x, y, x + w, y + h), (0x5E, 0x00, 0x08, 245), (0x4A, 0x00, 0x08, 245), (0x3A, 0x00, 0x05, 245), radius=12, outline=(255, 217, 138, 160), width=2)
     tb = draw.textbbox((0, 0), avg_text, font=font)
     draw.text((x + (w - (tb[2] - tb[0])) / 2, y + (h - (tb[3] - tb[1])) / 2 - 2), avg_text, fill=(255, 244, 214, 255), font=font)
 
 
-def render_progress(draw, x, y, ratio):
+def render_run_rate_block(draw, font, x, y, ratio: float | None):
     segments = 8
     sw, sh, gap = 18, 18, 6
+    if ratio is None:
+        draw.text((x + 78, y - 4), "—", fill=(233, 211, 167, 230), font=font)
+        return
     filled = int(round(max(0.0, min(ratio, 1.0)) * segments))
     for i in range(segments):
         sx = x + i * (sw + gap)
         col = (255, 215, 107, 235) if i < filled else (58, 26, 18, 255)
         draw.rounded_rectangle((sx, y, sx + sw, y + sh), radius=4, fill=col)
+    pct = f"{int(ratio * 100)}%"
+    draw.text((x + 8 * (sw + gap) + 10, y - 1), pct, fill=(245, 199, 106, 225), font=font)
 
 
-def render_total(draw, font, x, y, w, h, total_text, is_top1=False):
+def render_total_block(draw, font, x, y, w, h, total_text, is_top1=False):
     _gradient_rect(draw, (x, y, x + w, y + h), (0x3A, 0x0B, 0x0B, 245), (0x2B, 0x13, 0x0E, 245), (0x1A, 0x05, 0x05, 250), radius=12, outline=(255, 217, 138, 210), width=2)
     color = (255, 217, 138, 255) if is_top1 else (255, 244, 214, 255)
     tb = draw.textbbox((0, 0), total_text, font=font)
@@ -4563,7 +4568,7 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
     top_pad, bottom_pad, left_pad, right_pad = 80, 80, 80, 80
     row_height, row_gap = 110, 22
 
-    cols_raw = [120, 120, 520, 240, 240, 360]
+    cols_raw = [150, 560, 240, 250, 280]
     content_w = width - left_pad - right_pad
     scale = content_w / sum(cols_raw)
     cols = [int(v * scale) for v in cols_raw]
@@ -4589,9 +4594,8 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
     render_title(draw, title_font, subtitle_font, width, top_pad, decade_title)
 
     header_y = top_pad + title_h
-    render_table_header(draw, header_font, left_pad, header_y, cols, gap=18)
+    render_table_header(draw, header_font, left_pad, header_y, [150, 560, 240, 250, 280], gap=10)
 
-    leader_total = max(int(row.get("total_amount") or 0) for row in decade_leaders) or 1
     y = header_y + header_h
     avatars = top3_avatars or {}
 
@@ -4599,26 +4603,24 @@ def build_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict],
         x = left_pad
         render_row_panel(img, draw, (left_pad, y, width - right_pad, y + row_height), place)
 
-        render_rank(draw, rank_font, x, y, cols[0], row_height, place)
+        render_rank_block(draw, rank_font, x, y, cols[0], row_height, place)
         x += cols[0]
 
         av = avatars.get(int(row.get("telegram_id") or 0))
         bcol = {1: (255, 217, 138, 255), 2: (217, 217, 217, 255), 3: (194, 122, 58, 255)}.get(place, (255, 217, 138, 210))
-        render_avatar(img, av, x + (cols[1] - 72) // 2, y + (row_height - 72) // 2, 72, _initials(str(row.get("name", ""))), bcol, is_top1=(place == 1))
+        render_avatar(img, av, x + 12, y + (row_height - 72) // 2, 72, _initials(str(row.get("name", ""))), bcol, is_top1=(place == 1))
+        render_employee_block(draw, name_font, x + 96, y + 32, cols[1] - 108, str(row.get("name", "—")))
         x += cols[1]
 
-        render_name(draw, name_font, x + 10, y + 32, cols[2] - 20, str(row.get("name", "—")))
+        avg_text = "—" if float(row.get("total_hours") or 0) <= 0 else f"{format_money(int(row.get('avg_per_hour') or 0))}"
+        render_avg_hour_block(draw, avg_font, x + 10, y + 20, cols[2] - 20, 70, avg_text)
         x += cols[2]
 
-        avg_text = "—" if float(row.get("total_hours") or 0) <= 0 else f"{format_money(int(row.get('avg_per_hour') or 0))}"
-        render_avg_hour(draw, avg_font, x + 10, y + 20, cols[3] - 20, 70, avg_text)
+        run_rate = row.get("run_rate")
+        render_run_rate_block(draw, header_font, x + 12, y + (row_height - 18) // 2, run_rate)
         x += cols[3]
 
-        ratio = int(row.get("total_amount") or 0) / leader_total
-        render_progress(draw, x + 16, y + (row_height - 18) // 2, ratio)
-        x += cols[4]
-
-        render_total(draw, total_font, x + 10, y + 16, cols[5] - 20, 78, format_money(int(row.get("total_amount") or 0)), is_top1=(place == 1))
+        render_total_block(draw, total_font, x + 10, y + 16, cols[4] - 20, 78, format_money(int(row.get("total_amount") or 0)), is_top1=(place == 1))
 
         y += row_height + row_gap
 
@@ -4647,7 +4649,7 @@ async def send_leaderboard_output(chat_target, context: CallbackContext, decade_
         for leader in decade_leaders:
             uid = int(leader.get("telegram_id") or 0)
             name = str(leader.get("name", ""))
-            tasks.append(get_avatar_image_async(context.bot, uid, 44, fallback_name=name))
+            tasks.append(get_avatar_image_async(context.bot, uid, 96, fallback_name=name))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for leader, res in zip(decade_leaders, results):
             if not isinstance(res, Exception):

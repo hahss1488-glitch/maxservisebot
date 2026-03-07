@@ -373,73 +373,203 @@ def draw_progress_ring(canvas: Image.Image, center: tuple[int, int], outer_d: in
         d.arc(box, start=a0, end=min(a1, end), fill=col, width=thickness)
 
 
-def draw_coin_illustration(canvas: Image.Image, anchor: tuple[int, int]):
-    ax, ay = anchor
+def _lerp_color(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    t = max(0.0, min(1.0, t))
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+
+
+def _draw_soft_glow(canvas: Image.Image, box: tuple[int, int, int, int], color: tuple[int, int, int, int], blur: int, radius: int):
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    for i, off in enumerate((0, 16, 32, 48, 64)):
-        cx, cy = ax - off, ay - i * 9
-        d.ellipse((cx - 34, cy - 15, cx + 34, cy + 15), fill=(255, 182, 72, 55), outline=(255, 216, 135, 235), width=2)
-        d.ellipse((cx - 24, cy - 8, cx + 24, cy + 8), outline=(255, 238, 178, 170), width=2)
-        d.line((cx - 20, cy - 3, cx + 20, cy - 3), fill=(255, 248, 210, 110), width=2)
-    d.text((ax - 16, ay - 14), "₽", fill=(255, 227, 150, 225), font=font(28, "bold"))
-    canvas.alpha_composite(layer.filter(ImageFilter.GaussianBlur(1)))
+    ImageDraw.Draw(layer, "RGBA").rounded_rectangle(box, radius=radius, fill=color)
+    canvas.alpha_composite(layer.filter(ImageFilter.GaussianBlur(blur)))
 
 
-def draw_calendar_shift_icon(canvas: Image.Image, box: tuple[int, int, int, int]):
+def _draw_liquid_panel(
+    canvas: Image.Image,
+    box: tuple[int, int, int, int],
+    radius: int,
+    base_fill: tuple[int, int, int, int] = (18, 26, 44, 189),
+    glow: tuple[tuple[int, int, int, int], int] | None = None,
+):
     x1, y1, x2, y2 = box
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    d.rounded_rectangle((x1 + 4, y1 + 6, x2 - 20, y2 - 8), radius=14, fill=(47, 140, 255, 30), outline=(164, 170, 255, 235), width=4)
-    d.line((x1 + 14, y1 + 27, x2 - 28, y1 + 27), fill=(143, 179, 255, 235), width=4)
-    for dx in (18, 32):
-        d.line((x1 + dx, y1 + 2, x1 + dx, y1 + 14), fill=(199, 214, 255, 220), width=4)
-    d.ellipse((x2 - 38, y2 - 38, x2 - 4, y2 - 4), fill=(58, 112, 255, 35), outline=(143, 179, 255, 230), width=4)
-    d.line((x2 - 21, y2 - 21, x2 - 21, y2 - 31), fill=(183, 206, 255, 240), width=3)
-    d.line((x2 - 21, y2 - 21, x2 - 13, y2 - 17), fill=(183, 206, 255, 240), width=3)
-    canvas.alpha_composite(layer.filter(ImageFilter.GaussianBlur(1)))
+    w, h = x2 - x1, y2 - y1
 
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow, "RGBA").rounded_rectangle((x1, y1 + 14, x2, y2 + 14), radius=radius, fill=(0, 0, 0, 82))
+    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(34)))
 
-def draw_trend_arrow_icon(canvas: Image.Image, box: tuple[int, int, int, int]):
-    x1, y1, x2, y2 = box
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    c = (81, 245, 162, 245)
-    pts = [(x1 + 8, y2 - 10), (x1 + 32, y1 + 44), (x1 + 60, y1 + 36), (x2 - 18, y1 + 14)]
-    d.line(pts, fill=c, width=5, joint="curve")
-    d.line((x1 + 12, y2 - 14, x1 + 40, y1 + 40), fill=(190, 255, 220, 70), width=3)
-    d.polygon([(x2 - 24, y1 + 12), (x2 - 8, y1 + 13), (x2 - 16, y1 + 28)], fill=c)
-    canvas.alpha_composite(layer.filter(ImageFilter.GaussianBlur(1)))
+    if glow:
+        _draw_soft_glow(canvas, (x1 + 10, y1 + 8, x2 - 10, y2 - 2), glow[0], glow[1], max(12, radius - 8))
+
+    panel = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    pd = ImageDraw.Draw(panel, "RGBA")
+    pd.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=base_fill)
+
+    top_grad = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    td = ImageDraw.Draw(top_grad, "RGBA")
+    for y in range(h):
+        t = y / max(1, h - 1)
+        a = int(20 * max(0.0, (1 - t * 1.5)))
+        td.line((0, y, w, y), fill=(255, 255, 255, a))
+    panel.alpha_composite(top_grad)
+
+    pd.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, outline=(185, 220, 255, 46), width=1)
+    pd.rounded_rectangle((2, 2, w - 3, h - 3), radius=max(4, radius - 2), outline=(255, 255, 255, 10), width=1)
+    pd.line((24, 12, w - 24, 12), fill=(255, 255, 255, 26), width=1)
+    canvas.alpha_composite(panel, (x1, y1))
 
 
 def _draw_dashboard_background(width: int, height: int) -> Image.Image:
-    img = Image.new("RGBA", (width, height), THEME["BG_1"])
+    img = Image.new("RGBA", (width, height), _hex("#07101D"))
     d = ImageDraw.Draw(img, "RGBA")
-    stops = [(0.0, _hex(THEME["BG_1"])), (0.35, _hex(THEME["BG_2"])), (0.7, _hex(THEME["BG_3"])), (1.0, _hex(THEME["BG_4"]))]
+    c1, c2, c3, c4 = _hex("#07101D"), _hex("#0B1424"), _hex("#101A2C"), _hex("#172235")
     for y in range(height):
         t = y / max(1, height - 1)
-        for i in range(len(stops) - 1):
-            if stops[i][0] <= t <= stops[i + 1][0]:
-                t0, c0 = stops[i]
-                t1, c1 = stops[i + 1]
-                k = (t - t0) / max(1e-6, (t1 - t0))
-                col = tuple(int(c0[j] + (c1[j] - c0[j]) * k) for j in range(3)) + (255,)
-                d.line((0, y, width, y), fill=col)
-                break
+        if t < 0.42:
+            col = _lerp_color(c1[:3], c2[:3], t / 0.42)
+        elif t < 0.76:
+            col = _lerp_color(c2[:3], c3[:3], (t - 0.42) / 0.34)
+        else:
+            col = _lerp_color(c3[:3], c4[:3], (t - 0.76) / 0.24)
+        d.line((0, y, width, y), fill=col + (255,))
 
-    ambient = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    ad = ImageDraw.Draw(ambient, "RGBA")
-    ad.ellipse((260 * SS, 120 * SS, 1020 * SS, 720 * SS), fill=(57, 93, 150, 26))
-    ad.ellipse((860 * SS, 120 * SS, 1580 * SS, 760 * SS), fill=(73, 102, 168, 22))
-    ad.ellipse((590 * SS, 480 * SS, 1420 * SS, 980 * SS), fill=(41, 86, 148, 20))
-    img.alpha_composite(ambient.filter(ImageFilter.GaussianBlur(72 * SS)))
+    hero_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(hero_glow, "RGBA")
+    hd.ellipse((300 * SS, 170 * SS, 1220 * SS, 740 * SS), fill=(66, 232, 255, 22))
+    hd.ellipse((860 * SS, 120 * SS, 1500 * SS, 680 * SS), fill=(122, 97, 255, 20))
+    img.alpha_composite(hero_glow.filter(ImageFilter.GaussianBlur(70 * SS)))
 
-    vignette = Image.new("L", (width, height), 0)
-    vd = ImageDraw.Draw(vignette)
-    vd.rectangle((0, 0, width, height), fill=52)
-    vd.rounded_rectangle((120 * SS, 100 * SS, width - 120 * SS, height - 90 * SS), radius=220 * SS, fill=0)
-    img = Image.composite(Image.new("RGBA", (width, height), (0, 0, 0, 58)), img, vignette.filter(ImageFilter.GaussianBlur(180 * SS)))
+    vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    vd = ImageDraw.Draw(vignette, "RGBA")
+    vd.rectangle((0, 0, width, height), fill=(0, 0, 0, 35))
+    vd.rounded_rectangle((80 * SS, 60 * SS, width - 80 * SS, height - 50 * SS), radius=220 * SS, fill=(0, 0, 0, 0))
+    img.alpha_composite(vignette.filter(ImageFilter.GaussianBlur(90 * SS)))
     return img
+
+
+def _draw_ring(canvas: Image.Image, center: tuple[int, int], diameter: int, width: int, completion: Any):
+    cx, cy = center
+    r = diameter // 2
+    box = (cx - r, cy - r, cx + r, cy + r)
+    d = ImageDraw.Draw(canvas, "RGBA")
+    d.arc(box, start=-90, end=270, fill=(80, 105, 150, 170), width=width)
+
+    p = _progress_ratio(completion)
+    end = -90 + int(360 * p)
+    if p <= 0:
+        return
+
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow, "RGBA")
+    gd.arc(box, start=-90, end=end, fill=(66, 232, 255, 140), width=width + 2)
+    gd.arc((box[0] - 6, box[1] - 6, box[2] + 6, box[3] + 6), start=-90, end=end, fill=(176, 108, 255, 80), width=6)
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(18)))
+
+    steps = max(180, int(diameter * 2.5))
+    c1, c2, c3, c4 = (66, 232, 255), (47, 140, 255), (123, 97, 255), (176, 108, 255)
+    for i in range(steps):
+        t0 = i / steps
+        a0 = -90 + int((end + 90) * t0)
+        a1 = -90 + int((end + 90) * (i + 1) / steps)
+        if a0 >= end:
+            break
+        if t0 < 0.35:
+            col = _lerp_color(c1, c2, t0 / 0.35)
+        elif t0 < 0.72:
+            col = _lerp_color(c2, c3, (t0 - 0.35) / 0.37)
+        else:
+            col = _lerp_color(c3, c4, (t0 - 0.72) / 0.28)
+        d.arc(box, start=a0, end=min(a1, end), fill=col + (255,), width=width)
+
+
+def _draw_progress_bar(canvas: Image.Image, box: tuple[int, int, int, int], completion: Any):
+    x1, y1, x2, y2 = box
+    h = y2 - y1
+    radius = h // 2
+    d = ImageDraw.Draw(canvas, "RGBA")
+    d.rounded_rectangle(box, radius=radius, fill=(9, 17, 34, 190), outline=(185, 220, 255, 45), width=1)
+    d.rounded_rectangle((x1 + 2, y1 + 2, x2 - 3, y2 - 3), radius=radius - 2, outline=(255, 255, 255, 12), width=1)
+
+    p = _progress_ratio(completion)
+    fw = int((x2 - x1 - 4) * p)
+    if fw <= 0:
+        return
+
+    fill_box = (x1 + 2, y1 + 2, x1 + 2 + fw, y2 - 2)
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow, "RGBA")
+    gd.rounded_rectangle(fill_box, radius=radius - 2, fill=(66, 232, 255, 118))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(16)))
+
+    grad = Image.new("RGBA", (max(1, fw), h - 4), (0, 0, 0, 0))
+    g = ImageDraw.Draw(grad, "RGBA")
+    c1, c2, c3 = (66, 232, 255), (47, 140, 255), (123, 97, 255)
+    for i in range(max(1, fw)):
+        t = i / max(1, fw - 1)
+        col = _lerp_color(c1, c2, t / 0.55) if t < 0.55 else _lerp_color(c2, c3, (t - 0.55) / 0.45)
+        g.line((i, 0, i, h - 5), fill=col + (255,))
+    g.line((8, 4, max(10, fw - 8), 4), fill=(255, 255, 255, 84), width=2)
+    canvas.paste(grad, (x1 + 2, y1 + 2), rounded_mask((max(1, fw), h - 4), max(2, radius - 2)))
+
+    ex = x1 + 2 + fw
+    cap = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    cd = ImageDraw.Draw(cap, "RGBA")
+    cd.ellipse((ex - 12, y1 - 2, ex + 12, y2 + 2), fill=(176, 108, 255, 138))
+    canvas.alpha_composite(cap.filter(ImageFilter.GaussianBlur(10)))
+
+
+def _draw_coin_cluster(canvas: Image.Image, anchor: tuple[int, int]):
+    ax, ay = anchor
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer, "RGBA")
+    coins = [(-78, 22, 58), (-42, 12, 54), (-2, 6, 60), (40, 8, 56), (74, 22, 50), (-20, -10, 52), (22, -18, 48), (58, -8, 46)]
+    for dx, dy, r in coins:
+        cx, cy = ax + dx, ay + dy
+        d.ellipse((cx - r, cy - r * 0.46, cx + r, cy + r * 0.46), fill=(255, 182, 72, 72), outline=(255, 211, 110, 245), width=3)
+        d.ellipse((cx - r * 0.72, cy - r * 0.29, cx + r * 0.72, cy + r * 0.29), outline=(255, 236, 178, 180), width=2)
+        d.text((cx, cy - 1), "₽", fill=(255, 246, 201, 210), font=font(26 * SS, "bold"), anchor="mm")
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow, "RGBA").ellipse((ax - 180, ay - 120, ax + 180, ay + 120), fill=(255, 182, 72, 90))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(26)))
+    canvas.alpha_composite(layer)
+
+
+def _draw_calendar_icon(canvas: Image.Image, box: tuple[int, int, int, int]):
+    x1, y1, x2, y2 = box
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer, "RGBA")
+    d.rounded_rectangle((x1, y1, x2, y2), radius=22 * SS, fill=(42, 104, 255, 45), outline=(143, 179, 255, 220), width=3)
+    d.rounded_rectangle((x1 + 10 * SS, y1 + 18 * SS, x2 - 10 * SS, y2 - 10 * SS), radius=16 * SS, outline=(198, 212, 255, 120), width=2)
+    d.line((x1 + 16 * SS, y1 + 38 * SS, x2 - 16 * SS, y1 + 38 * SS), fill=(168, 205, 255, 220), width=3)
+    for i in range(3):
+        for j in range(2):
+            cx = x1 + (24 + i * 24) * SS
+            cy = y1 + (56 + j * 22) * SS
+            d.ellipse((cx - 3 * SS, cy - 3 * SS, cx + 3 * SS, cy + 3 * SS), fill=(168, 205, 255, 210))
+    d.ellipse((x2 - 32 * SS, y2 - 30 * SS, x2 - 6 * SS, y2 - 4 * SS), fill=(64, 130, 255, 90), outline=(180, 208, 255, 220), width=2)
+    d.line((x2 - 19 * SS, y2 - 17 * SS, x2 - 19 * SS, y2 - 24 * SS), fill=(223, 235, 255, 230), width=2)
+    d.line((x2 - 19 * SS, y2 - 17 * SS, x2 - 13 * SS, y2 - 14 * SS), fill=(223, 235, 255, 230), width=2)
+    canvas.alpha_composite(layer)
+
+
+def _draw_trend_icon(canvas: Image.Image, box: tuple[int, int, int, int]):
+    x1, y1, x2, y2 = box
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow, "RGBA").ellipse((x1 - 50 * SS, y1 - 28 * SS, x2 + 30 * SS, y2 + 24 * SS), fill=(34, 226, 122, 95))
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(26)))
+
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer, "RGBA")
+    pts = [
+        (x1 + 8 * SS, y2 - 14 * SS),
+        (x1 + 36 * SS, y1 + 36 * SS),
+        (x1 + 70 * SS, y1 + 44 * SS),
+        (x2 - 34 * SS, y1 + 16 * SS),
+    ]
+    d.line(pts, fill=(82, 247, 165, 245), width=7, joint="curve")
+    d.line((pts[0][0], pts[0][1], pts[1][0], pts[1][1]), fill=(198, 255, 225, 90), width=3)
+    d.polygon([(x2 - 40 * SS, y1 + 10 * SS), (x2 - 12 * SS, y1 + 16 * SS), (x2 - 28 * SS, y1 + 34 * SS)], fill=(82, 247, 165, 250))
+    canvas.alpha_composite(layer)
 
 
 def _render_dashboard_footer_dt(value: Any) -> str:
@@ -458,98 +588,99 @@ def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
     c = _draw_dashboard_background(W * s, H * s)
     d = ImageDraw.Draw(c, "RGBA")
 
-    header = (56 * s, 44 * s, (56 + 1488) * s, (44 + 116) * s)
-    draw_premium_glass_card(c, header, 42 * s, glow=((47, 140, 255, 52), 24 * s), fill=(18, 26, 44, 188), shadow_blur=36 * s)
-    d.text((96 * s, 62 * s), "Дашборд", fill=THEME["TEXT_PRIMARY"], font=font(52 * s, "bold"))
-    sub = payload.get("decade_title") or "1-я декада · 1–10 марта"
-    st, sf = fit_text_to_width(sub, 27 * s, 22 * s, 860 * s, "medium")
-    d.text((96 * s, 123 * s), st, fill=THEME["TEXT_SECONDARY"], font=sf)
+    header = (56 * s, 40 * s, 1544 * s, 152 * s)
+    hero = (56 * s, 170 * s, 1544 * s, 520 * s)
+    cards = [
+        (56 * s, 538 * s, 529 * s, 698 * s),
+        (563 * s, 538 * s, 1036 * s, 698 * s),
+        (1071 * s, 538 * s, 1544 * s, 698 * s),
+    ]
+    stats = (56 * s, 714 * s, 1544 * s, 806 * s)
 
-    status_box = (1088 * s, 64 * s, (1088 + 332) * s, (64 + 66) * s)
-    draw_premium_glass_card(c, status_box, 32 * s, fill=(20, 37, 49, 192), border_outer=(170, 242, 205, 70), border_inner=(255, 255, 255, 14), glow=((34, 226, 122, 96), 18 * s), shadow_blur=32 * s, shadow_offset_y=10 * s)
-    ImageDraw.Draw(c, "RGBA").line((status_box[0] + 24 * s, status_box[1] + 9 * s, status_box[2] - 24 * s, status_box[1] + 9 * s), fill=(255, 255, 255, 26), width=2)
-    dot_center = (1126 * s, 97 * s)
+    _draw_liquid_panel(c, header, 40 * s, glow=((66, 232, 255, 48), 24 * s))
+    _draw_liquid_panel(c, hero, 42 * s, glow=((66, 232, 255, 58), 34 * s))
+    _draw_liquid_panel(c, cards[0], 32 * s, glow=((255, 182, 72, 72), 28 * s))
+    _draw_liquid_panel(c, cards[1], 32 * s, glow=((90, 125, 255, 80), 30 * s))
+    _draw_liquid_panel(c, cards[2], 32 * s, glow=((34, 226, 122, 80), 30 * s))
+    _draw_liquid_panel(c, stats, 32 * s, glow=((80, 130, 255, 36), 18 * s))
+
+    title = payload.get("title") or "Дашборд"
+    subtitle = payload.get("decade_title") or "1-я декада: 1-10 марта · 01.03-10.03"
+    d.text((94 * s, 90 * s), title, fill=_hex("#F5F9FF"), font=font(52 * s, "bold"), anchor="ls")
+    d.text((94 * s, 132 * s), subtitle, fill=_hex("#B9C7DB"), font=font(27 * s, "medium"), anchor="ls")
+
+    status_text = payload.get("shift_status") or "Смена активна"
+    sp = (1244 * s, 68 * s, 1512 * s, 128 * s)
+    _draw_liquid_panel(c, sp, 30 * s, base_fill=(20, 46, 38, 172), glow=((34, 226, 122, 90), 18 * s))
+    d.ellipse((1268 * s, 86 * s, 1288 * s, 106 * s), fill=_hex("#22E27A"), outline=(200, 255, 220, 255), width=1)
     dot_glow = Image.new("RGBA", c.size, (0, 0, 0, 0))
-    ImageDraw.Draw(dot_glow, "RGBA").ellipse((dot_center[0] - 18 * s, dot_center[1] - 18 * s, dot_center[0] + 18 * s, dot_center[1] + 18 * s), fill=(34, 226, 122, 78))
-    c.alpha_composite(dot_glow.filter(ImageFilter.GaussianBlur(16 * s)))
-    d.ellipse((dot_center[0] - 9 * s, dot_center[1] - 9 * s, dot_center[0] + 9 * s, dot_center[1] + 9 * s), fill=THEME["STATUS_ACTIVE_DOT"])
-    d.text((1168 * s, 86 * s), "Смена активна" if mode != "closed" else "Смена закрыта", fill=THEME["TEXT_PRIMARY"], font=font(24 * s, "semibold"))
+    ImageDraw.Draw(dot_glow, "RGBA").ellipse((1258 * s, 76 * s, 1298 * s, 116 * s), fill=(34, 226, 122, 110))
+    c.alpha_composite(dot_glow.filter(ImageFilter.GaussianBlur(10)))
+    d.text((1300 * s, 98 * s), status_text, fill=_hex("#D8FFE9"), font=font(24 * s, "semibold"), anchor="lm")
 
-    hero = (80 * s, 190 * s, (80 + 1440) * s, (190 + 338) * s)
-    draw_premium_glass_card(c, hero, 44 * s, fill=(18, 26, 44, 196), glow=(THEME["GLOW_BLUE"], 28 * s), shadow_blur=36 * s)
-    draw_glow(c, (136 * s, 286 * s, 786 * s, 512 * s), (69, 230, 255, 48), 22 * s)
-    draw_glow(c, (1076 * s, 244 * s, 1456 * s, 506 * s), (123, 97, 255, 52), 24 * s)
-
-    d.ellipse((692 * s, 238 * s, 700 * s, 246 * s), fill=THEME["GOLD_2"])
-    d.text((720 * s, 242 * s), payload.get("revenue_label", "Выручка"), fill=THEME["TEXT_SECONDARY"], font=font(22 * s, "medium"), anchor="lm")
-
-    earned = payload.get("decade_earned", payload.get("earned", 0))
-    goal = payload.get("decade_goal", payload.get("goal", 0))
+    earned = _safe_i(payload.get("decade_earned", payload.get("earned", 0)))
+    goal = _safe_i(payload.get("decade_goal", payload.get("goal", 0)))
     main_value = payload.get("current_amount") or format_money(earned)
     target_value = payload.get("target_amount") or format_money(goal)
-
-    main_text, main_font = fit_text_to_width(main_value, 78 * s, 64 * s, 640 * s, "bold", ellipsis=False)
-    mw, mh = measure(d, main_text, main_font)
-    d.text((720 * s - mw // 2, 340 * s - mh), main_text, fill=THEME["TEXT_PRIMARY"], font=main_font)
-
-    sub_text, sub_font = fit_text_to_width(f"из {target_value}", 34 * s, 28 * s, 580 * s, "semibold", ellipsis=False)
-    sw, sh = measure(d, sub_text, sub_font)
-    d.text((720 * s - sw // 2, 410 * s - sh), sub_text, fill=THEME["TEXT_SECONDARY"], font=sub_font)
-
     completion = payload.get("completion_percent")
-    draw_progress_bar(c, (150 * s, 455 * s, (150 + 1180) * s, (455 + 28) * s), completion)
 
-    ring_center = (1230 * s, 351 * s)
-    draw_progress_ring(c, ring_center, 212 * s, 22 * s, completion)
-    percent_text = f"{int(round(_progress_ratio(completion) * 100))}%"
-    d.text((ring_center[0], ring_center[1] - 18 * s), percent_text, fill=THEME["TEXT_PRIMARY"], font=font(54 * s, "bold"), anchor="mm")
-    d.text((ring_center[0], ring_center[1] + 34 * s), "Выполнено", fill=THEME["TEXT_SECONDARY"], font=font(22 * s, "semibold"), anchor="mm")
+    d.text((170 * s, 262 * s), payload.get("revenue_label") or "Выручка", fill=_hex("#B9C7DB"), font=font(30 * s, "medium"), anchor="ls")
+    d.text((170 * s, 350 * s), main_value, fill=_hex("#F5F9FF"), font=font(92 * s, "bold"), anchor="ls")
+    d.text((170 * s, 410 * s), f"из {target_value}", fill=_hex("#C6D5EA"), font=font(34 * s, "semibold"), anchor="ls")
+
+    _draw_progress_bar(c, (170 * s, 458 * s, 1000 * s, 492 * s), completion)
+
+    ring_center = (1260 * s, 344 * s)
+    _draw_ring(c, ring_center, 216 * s, 23 * s, completion)
+    pct = f"{int(round(_progress_ratio(completion) * 100))}%"
+    d.text((ring_center[0], ring_center[1] - 16 * s), pct, fill=_hex("#F5F9FF"), font=font(58 * s, "bold"), anchor="mm")
+    d.text((ring_center[0], ring_center[1] + 32 * s), "Выполнено", fill=_hex("#B9C7DB"), font=font(24 * s, "semibold"), anchor="mm")
 
     remaining_text = payload.get("remaining_amount") or payload.get("remaining_text") or "—"
     if remaining_text == "—" and goal:
-        remaining_text = format_money(max(int(goal) - int(earned), 0))
-    d.text((1188 * s, 500 * s), f"Осталось {remaining_text}", fill=THEME["TEXT_SECONDARY"], font=font(26 * s, "semibold"), anchor="ls")
+        remaining_text = format_money(max(goal - earned, 0))
+    d.text((1170 * s, 462 * s), f"Осталось {remaining_text}", fill=_hex("#B9C7DB"), font=font(28 * s, "semibold"), anchor="ls")
 
     metric_rows = payload.get("decade_metrics") or payload.get("metrics") or []
     metric_map = {str(row[0]).lower(): str(row[1]) for row in metric_rows if isinstance(row, (list, tuple)) and len(row) >= 2}
     shifts_left = payload.get("shifts_left") or metric_map.get("осталось смен") or metric_map.get("смен осталось") or "—"
     per_shift_needed = payload.get("per_shift_needed") or metric_map.get("нужно в смену") or "—"
 
-    cards = [
-        ((92, 550, 566, 712), "Осталось до плана", remaining_text, THEME["GLOW_GOLD"]),
-        ((582, 550, 1056, 712), "Смен осталось", str(shifts_left), THEME["GLOW_VIOLET"]),
-        ((1072, 550, 1520, 712), "Нужно в смену", str(per_shift_needed), THEME["GLOW_GREEN"]),
+    kpi_data = [
+        (cards[0], "Осталось до плана", str(remaining_text), _hex("#FFD36E")),
+        (cards[1], "Смен осталось", str(shifts_left), _hex("#AFC4FF")),
+        (cards[2], "Нужно в смену", str(per_shift_needed), _hex("#9FFFCB")),
     ]
-    for i, (box_u, title, value, glow_col) in enumerate(cards):
-        box = tuple(v * s for v in box_u)
-        draw_premium_glass_card(c, box, 34 * s, fill=(18, 27, 46, 196), glow=(glow_col, 26 * s if i != 1 else 28 * s), shadow_blur=34 * s)
-        tx = (128 + i * 490) * s if i < 2 else 1108 * s
-        d.text((tx, 604 * s), title, fill=THEME["GREEN_2"] if i == 2 else THEME["TEXT_PRIMARY"], font=font(27 * s, "medium"), anchor="ls")
-        size = 64 if i == 1 else 58
-        vtxt, vf = fit_text_to_width(str(value), size * s, 44 * s, (240 if i != 2 else 300) * s, "bold", ellipsis=False)
-        d.text((tx, 670 * s), vtxt, fill=THEME["TEXT_PRIMARY"], font=vf, anchor="ls")
+    for box, label, value, accent in kpi_data:
+        bx1, by1, bx2, by2 = box
+        d.text((bx1 + 28 * s, by1 + 58 * s), label, fill=accent, font=font(28 * s, "medium"), anchor="ls")
+        vtxt, vf = fit_text_to_width(value, 62 * s, 42 * s, int((bx2 - bx1) * 0.54), "bold", ellipsis=False)
+        d.text((bx1 + 28 * s, by1 + 124 * s), vtxt, fill=_hex("#F5F9FF"), font=vf, anchor="ls")
 
-    draw_coin_illustration(c, (506 * s, 662 * s))
-    draw_calendar_shift_icon(c, (942 * s, 610 * s, 1032 * s, 694 * s))
-    draw_trend_arrow_icon(c, (1390 * s, 615 * s, 1494 * s, 692 * s))
+    _draw_coin_cluster(c, (460 * s, 648 * s))
+    _draw_calendar_icon(c, (938 * s, 578 * s, 1030 * s, 684 * s))
+    _draw_trend_icon(c, (1372 * s, 578 * s, 1516 * s, 686 * s))
 
-    stats = (92 * s, 734 * s, 1520 * s, 830 * s)
-    draw_premium_glass_card(c, stats, 34 * s, fill=(18, 26, 44, 190), border_outer=(190, 220, 255, 42), shadow_blur=30 * s, shadow_offset_y=10 * s)
     mini = payload.get("mini") or []
     g1 = mini[0] if len(mini) > 0 else f"Смен: {payload.get('shifts_done', '—')}"
     g2 = mini[1] if len(mini) > 1 else f"Машин: {payload.get('cars_done', '—')}"
     g3 = mini[2] if len(mini) > 2 else f"Средний чек: {payload.get('average_check', '—')}"
     g4 = mini[3] if len(mini) > 3 else payload.get("delta_badge", "+12% к прошлой декаде")
-    d.text((128 * s, 782 * s), g1, fill=THEME["TEXT_SECONDARY"], font=font(26 * s, "semibold"), anchor="lm")
-    d.text((500 * s, 782 * s), g2, fill=THEME["TEXT_SECONDARY"], font=font(26 * s, "semibold"), anchor="lm")
-    d.text((896 * s, 782 * s), g3, fill=THEME["TEXT_SECONDARY"], font=font(26 * s, "semibold"), anchor="lm")
 
-    delta_box = (1200 * s, 752 * s, 1494 * s, 812 * s)
-    draw_premium_glass_card(c, delta_box, 26 * s, fill=(31, 78, 58, 132), border_outer=(118, 255, 190, 86), border_inner=(214, 255, 232, 36), glow=((36, 217, 119, 62), 18 * s), shadow_blur=18 * s, shadow_offset_y=6 * s)
-    d.text((delta_box[0] + 18 * s, 782 * s), g4, fill=THEME["GREEN_2"], font=font(22 * s, "semibold"), anchor="lm")
+    wrappers = [(92 * s, 734 * s, 360 * s, 786 * s), (478 * s, 734 * s, 744 * s, 786 * s), (860 * s, 734 * s, 1170 * s, 786 * s)]
+    for wb in wrappers:
+        _draw_liquid_panel(c, wb, 22 * s, base_fill=(20, 31, 52, 148))
+    d.text((120 * s, 760 * s), g1, fill=_hex("#D0DEEF"), font=font(24 * s, "semibold"), anchor="lm")
+    d.text((506 * s, 760 * s), g2, fill=_hex("#D0DEEF"), font=font(24 * s, "semibold"), anchor="lm")
+    d.text((888 * s, 760 * s), g3, fill=_hex("#D0DEEF"), font=font(24 * s, "semibold"), anchor="lm")
+
+    badge = (1190 * s, 730 * s, 1510 * s, 790 * s)
+    _draw_liquid_panel(c, badge, 26 * s, base_fill=(26, 74, 58, 164), glow=((34, 226, 122, 74), 16 * s))
+    d.text((1208 * s, 760 * s), g4, fill=_hex("#8AFFC2"), font=font(22 * s, "semibold"), anchor="lm")
 
     footer_text = f"Обновлено: {_render_dashboard_footer_dt(payload.get('updated_at'))}"
-    d.text((860 * s, 874 * s), footer_text, fill=THEME["TEXT_MUTED"], font=font(24 * s, "medium"), anchor="ms")
+    d.text((730 * s, 856 * s), "◦", fill=_hex("#8B97B1"), font=font(20 * s, "semibold"), anchor="mm")
+    d.text((800 * s, 856 * s), footer_text, fill=_hex("#8B97B1"), font=font(24 * s, "medium"), anchor="mm")
 
     out = c.resize((W, H), Image.Resampling.LANCZOS)
     bio = BytesIO()
@@ -557,7 +688,6 @@ def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
     out.convert("RGB").save(bio, format="PNG")
     bio.seek(0)
     return bio
-
 
 
 

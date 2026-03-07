@@ -14,21 +14,28 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     dashboard_payload = {
-        'decade_title': '1-я декада: 1–10 марта · 01.03–10.03',
-        'decade_earned': 29529,
+        'title': 'Дашборд',
+        'decade_title': '1-я декада · 1–10 марта',
+        'shift_status': 'Смена активна',
+        'revenue_label': 'Выручка',
+        'decade_earned': 30205,
         'decade_goal': 50000,
-        'completion_percent': 0.59058,
-        'pace_text': '106%',
-        'pace_delta_text': '+1 751 ₽ к плану',
+        'current_amount': '30 205 ₽',
+        'target_amount': '50 000 ₽',
+        'completion_percent': 0.60,
+        'remaining_amount': '19 795 ₽',
+        'shifts_left': '3',
+        'per_shift_needed': '6 599 ₽',
         'decade_metrics': [
-            ('Осталось до цели', '20 471 ₽', (244, 248, 255, 255)),
-            ('Осталось смен', '8', (244, 248, 255, 255)),
-            ('Нужно в смену', '2 559 ₽', (244, 248, 255, 255)),
-            ('Средний план', '4 167 ₽', (244, 248, 255, 255)),
-            ('Опережение / отставание', '+1 751 ₽', (99, 245, 210, 255)),
-            ('Темп к плану', '106%', (99, 245, 210, 255)),
+            ('Осталось до плана', '19 795 ₽', (244, 248, 255, 255)),
+            ('Смен осталось', '3', (244, 248, 255, 255)),
+            ('Нужно в смену', '6 599 ₽', (244, 248, 255, 255)),
         ],
-        'mini': ['Смен: 12', 'Машин: 117', 'Средний чек: 1 993 ₽'],
+        'shifts_done': '6',
+        'cars_done': '95',
+        'average_check': '317 ₽',
+        'mini': ['Смен: 6', 'Машин: 95', 'Средний чек: 317 ₽'],
+        'updated_at': '2026-03-07T17:30:00',
     }
     b = render_dashboard_image_bytes('closed', dashboard_payload)
     (out / 'dashboard_preview.png').write_bytes(b.getvalue())

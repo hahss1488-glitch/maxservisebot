@@ -751,6 +751,7 @@ class DatabaseManager:
         cur.execute(
             f"""SELECT u.id as user_id, u.name, u.telegram_id,
             COALESCE(SUM(c.total_amount), 0) as total_amount,
+            COUNT(c.id) as cars_count,
             COUNT(DISTINCT s.id) as shift_count,
             COALESCE(us.decade_goal, 0) as decade_goal
             FROM users u
@@ -1699,8 +1700,9 @@ class DatabaseManager:
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            f"""SELECT COUNT(s.id)
+            f"""SELECT COUNT(DISTINCT s.id)
             FROM shifts s
+            JOIN cars c ON c.shift_id = s.id
             WHERE s.user_id = ? AND {SHIFT_WORK_DAY_EXPR} BETWEEN date(?) AND date(?)""",
             (user_id, start_date, end_date)
         )

@@ -43,25 +43,25 @@ def _pct(value: Any) -> float | None:
 def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
     if mode == "open":
         mini = payload.get("mini") or []
-        mini_income_per_hour = mini[1] if len(mini) > 1 else "Машин: —"
+        mini_cars = mini[1] if len(mini) > 1 else "Машин: —"
         mini_avg_check = mini[2] if len(mini) > 2 else "Средний чек: —"
         shift_income = int(payload.get("shift_income") or 0)
         shift_target = int(payload.get("shift_target") or 0)
         shift_progress = _pct(payload.get("today_progress"))
         if shift_income <= 0:
-            shift_badge = "Смена только началась"
+            shift_badge = "Смена открыта"
         elif (shift_progress or 0.0) >= 1.0:
-            shift_badge = "В темпе"
+            shift_badge = "Выше плана"
         elif (shift_progress or 0.0) >= 0.9:
-            shift_badge = "Почти по плану"
+            shift_badge = "В плане"
         else:
             shift_badge = "Ниже плана"
 
         decade_progress = _pct(payload.get("completion_percent"))
         if (decade_progress or 0.0) >= 1.0:
-            decade_badge = "В темпе"
+            decade_badge = "Выше плана"
         elif (decade_progress or 0.0) >= 0.9:
-            decade_badge = "Почти по плану"
+            decade_badge = "В плане"
         else:
             decade_badge = "Ниже плана"
 
@@ -75,8 +75,7 @@ def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
             metrics=[
                 MetricItem("Машин", str(int(payload.get("shift_cars") or 0))),
                 MetricItem("Средний чек", str(mini_avg_check).split(":", 1)[-1].strip() or "—"),
-                MetricItem("Доход в час", str(mini_income_per_hour).split(":", 1)[-1].strip() or "—"),
-                MetricItem("Время смены", payload.get("shift_start_label", "—")),
+                MetricItem("Время", payload.get("shift_start_label", "—")),
             ],
         )
         decade = PerformanceBlock(
@@ -86,7 +85,10 @@ def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
             target=int(payload.get("decade_goal") or 0),
             remaining=int(payload.get("remaining_text", "0").replace("₽", "").replace(" ", "") or 0) if isinstance(payload.get("remaining_text"), str) else int(payload.get("remaining") or 0),
             run_rate=decade_progress,
-            metrics=[MetricItem(k, v) for k, v, *_ in (payload.get("decade_metrics") or [])],
+            metrics=[
+                MetricItem("Машин", str(payload.get("decade_cars") or str(mini_cars).split(":", 1)[-1].strip() or "0")),
+                MetricItem("Смен", str(payload.get("decade_shifts") or str(mini[0]).split(":", 1)[-1].strip() if mini else "0")),
+            ],
         )
         data = MainDashboardData("Дашборд", "Смена открыта", payload.get("updated_at") or datetime.now(), shift, decade)
         return to_png_bytes(_renderer.render_main_dashboard(data), "dashboard.png")
@@ -117,8 +119,8 @@ def render_leaderboard_image_bytes(decade_title: str, decade_leaders: list[dict]
             rank=i,
             name=str(row.get("name", "—")),
             earnings=int(row.get("total_amount") or 0),
-            cars=int(row.get("cars_count") or 0) if row.get("cars_count") is not None else None,
-            income_per_hour=int(row.get("avg_per_hour") or 0) if row.get("avg_per_hour") is not None else None,
+            shifts=int(row.get("shifts_count") or row.get("shift_count") or 0),
+            cars=int(row.get("cars_count") or 0),
             avatar_path=str(row.get("avatar_path") or "") or None,
         )
         for i, row in enumerate(decade_leaders, start=1)

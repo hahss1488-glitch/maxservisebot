@@ -1302,6 +1302,8 @@ def _build_open_dashboard_payload(user_id: int, shift: dict, cars: list[dict], t
             f"Машин: {cars_done}",
             f"Средний чек: {format_money_glass(avg_check)}",
         ],
+        "decade_shifts": shifts_done,
+        "decade_cars": cars_done,
     }
 
 
@@ -1360,6 +1362,8 @@ def _build_closed_dashboard_payload(user_id: int, closed_shift: dict | None = No
             ("План смены выполнен ✅" if shift_plan_done is True else "План смены не выполнен ❌" if shift_plan_done is False else f"{pace_delta:+,}".replace(",", " ") + " ₽ к плану"),
         ],
         "pace_delta_text": f"{pace_delta:+,}".replace(",", " ") + " ₽ к плану" if pace_text != "Старт" else "—",
+        "decade_shifts": shifts_done,
+        "decade_cars": cars_done,
     }
 
 

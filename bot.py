@@ -708,8 +708,13 @@ TOOLS_COMBO = "🧩 Комбо"
 TOOLS_DECADE_GOAL = "🎯 Цель декады"
 TOOLS_RESET = "🗑️ Сброс всех данных"
 TOOLS_ADMIN = "🛡️ Админ панель"
-TOOLS_TOGGLE_IMAGES = "🖼 Убрать картинки"
+TOOLS_TOGGLE_IMAGES_OFF = "🖼 Убрать картинки"
+TOOLS_TOGGLE_IMAGES_ON = "🖼 Включить картинки"
 TOOLS_BACK = "🔙 Назад"
+
+
+def tools_toggle_images_label(images_enabled: bool) -> str:
+    return TOOLS_TOGGLE_IMAGES_OFF if images_enabled else TOOLS_TOGGLE_IMAGES_ON
 
 
 def create_main_reply_keyboard(has_active_shift: bool = False, subscription_active: bool = True, shift_paused: bool = False) -> ReplyKeyboardMarkup:
@@ -744,12 +749,12 @@ def create_main_reply_keyboard(has_active_shift: bool = False, subscription_acti
     )
 
 
-def create_tools_reply_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def create_tools_reply_keyboard(is_admin: bool = False, images_enabled: bool = True) -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(TOOLS_PRICE), KeyboardButton(TOOLS_CALENDAR)],
         [KeyboardButton(TOOLS_HISTORY), KeyboardButton(TOOLS_COMBO)],
         [KeyboardButton(TOOLS_DECADE_GOAL), KeyboardButton(TOOLS_RESET)],
-        [KeyboardButton(TOOLS_TOGGLE_IMAGES)],
+        [KeyboardButton(tools_toggle_images_label(images_enabled))],
     ]
     if is_admin:
         keyboard.append([KeyboardButton(TOOLS_ADMIN)])
@@ -1672,7 +1677,7 @@ async def tools_hub_message(update: Update, context: CallbackContext):
     push_screen(context, Screen(name="tools_menu", kind="reply"))
     await update.message.reply_text(
         "🧰 Инструменты\nВыбери нужный раздел.",
-        reply_markup=create_tools_reply_keyboard(is_admin=is_admin_telegram(update.effective_user.id)),
+        reply_markup=create_tools_reply_keyboard(is_admin=is_admin_telegram(update.effective_user.id), images_enabled=is_images_mode_enabled(DatabaseManager.get_user(update.effective_user.id))),
     )
 
 
@@ -2018,7 +2023,8 @@ async def handle_message(update: Update, context: CallbackContext):
         TOOLS_DECADE_GOAL,
         TOOLS_RESET,
         TOOLS_ADMIN,
-        TOOLS_TOGGLE_IMAGES,
+        TOOLS_TOGGLE_IMAGES_OFF,
+        TOOLS_TOGGLE_IMAGES_ON,
         TOOLS_BACK,
     }:
         db_user = DatabaseManager.get_user(user.id)
@@ -2051,7 +2057,7 @@ async def handle_message(update: Update, context: CallbackContext):
         if text == TOOLS_RESET:
             await update.message.reply_text("Подтверди сброс:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🗑️ Сброс всех данных", callback_data="reset_data")]]))
             return
-        if text == TOOLS_TOGGLE_IMAGES:
+        if text in {TOOLS_TOGGLE_IMAGES_OFF, TOOLS_TOGGLE_IMAGES_ON}:
             await toggle_images_mode_message(update, context)
             return
         if text == TOOLS_ADMIN and is_admin_telegram(user.id):
@@ -4557,8 +4563,17 @@ def _build_dashboard_image(mode: str, payload: dict) -> BytesIO | None:
 
 
 async def send_leaderboard_output(chat_target, context: CallbackContext, decade_title: str, decade_leaders: list[dict], reply_markup=None, highlight_name: str | None = None, requester_telegram_id: int | None = None):
-    del context, requester_telegram_id
     text_message = build_leaderboard_text(decade_title, decade_leaders)
+    db_user = DatabaseManager.get_user(requester_telegram_id) if requester_telegram_id else None
+    image = None
+    if is_images_mode_enabled(db_user):
+        try:
+            image = await asyncio.to_thread(build_leaderboard_image_bytes, decade_title, decade_leaders, highlight_name)
+        except Exception:
+            logger.exception("leaderboard image render failed")
+    if image is not None:
+        await chat_target.reply_photo(photo=image, filename="leaderboard.png", caption="🏆 Топ героев", reply_markup=reply_markup)
+        return
     await chat_target.reply_text(text_message, reply_markup=reply_markup)
 
 
@@ -5112,7 +5127,8 @@ async def toggle_images_mode(query, context):
 
     current = DatabaseManager.is_images_enabled(db_user["id"])
     DatabaseManager.set_images_enabled(db_user["id"], not current)
-    state = "выключены" if current else "включены"
+    new_enabled = not current
+    state = "включены" if new_enabled else "выключены"
     await query.edit_message_text(f"✅ Режим обновлён: картинки {state}.")
 
 
@@ -5124,8 +5140,15 @@ async def toggle_images_mode_message(update: Update, context: CallbackContext):
 
     current = DatabaseManager.is_images_enabled(db_user["id"])
     DatabaseManager.set_images_enabled(db_user["id"], not current)
-    state = "выключены" if current else "включены"
-    await update.message.reply_text(f"✅ Режим обновлён: картинки {state}.")
+    new_enabled = not current
+    state = "включены" if new_enabled else "выключены"
+    await update.message.reply_text(
+        f"✅ Режим обновлён: картинки {state}.",
+        reply_markup=create_tools_reply_keyboard(
+            is_admin=is_admin_telegram(update.effective_user.id),
+            images_enabled=new_enabled,
+        ),
+    )
 
 
 async def cleanup_data_menu(query, context):

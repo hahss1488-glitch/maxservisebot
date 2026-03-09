@@ -1821,6 +1821,9 @@ async def handle_message(update: Update, context: CallbackContext):
             if fast.car_number and not fast.services and len(text.split()) > 1:
                 await update.message.reply_text(f"❌ {fast.error_message}")
                 return
+            if fast.car_number and not fast.services and len(text.split()) > 1:
+                await update.message.reply_text(f"❌ {fast.error_message}")
+                return
 
     if is_admin_telegram(user.id) and db_user_for_access:
         if await process_admin_broadcast(update, context, db_user_for_access):

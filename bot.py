@@ -228,6 +228,47 @@ def parse_fast_car_with_services(text: str) -> FastParseResult:
     return FastParseResult(car_number=normalized, services=services)
 
 
+def ensure_db_user(telegram_user) -> dict | None:
+    db_user = DatabaseManager.get_user(int(telegram_user.id))
+    if db_user:
+        return db_user
+    name = " ".join(part for part in [telegram_user.first_name, telegram_user.last_name] if part) or telegram_user.username or "Пользователь"
+    DatabaseManager.register_user(int(telegram_user.id), name)
+    return DatabaseManager.get_user(int(telegram_user.id))
+
+
+async def handle_car_number_input(update: Update, context: CallbackContext, db_user: dict, text: str, force_reply: bool = False) -> bool:
+    is_valid, normalized_number, _ = validate_car_number(text)
+    if not is_valid:
+        return False
+
+    active_shift = DatabaseManager.get_active_shift(db_user['id'])
+    if not active_shift:
+        if force_reply:
+            await update.message.reply_text("❌ Нет активной смены! Сначала откройте смену.")
+        return False
+
+    car_id = DatabaseManager.add_car(active_shift['id'], normalized_number)
+    context.user_data.pop('awaiting_car_number', None)
+    context.user_data['current_car'] = car_id
+
+    try:
+        markup = create_services_keyboard(car_id, 0, False, get_price_mode(context, db_user["id"]), db_user["id"])
+    except Exception:
+        logger.exception("create_services_keyboard failed for car_id=%s user_id=%s", car_id, db_user.get("id"))
+        await update.message.reply_text(
+            f"🚗 Машина {normalized_number} добавлена, но не удалось открыть список услуг. Откройте 'Текущая смена' и выберите машину."
+        )
+        return True
+
+    await update.message.reply_text(
+        f"🚗 Машина: {normalized_number}\n"
+        f"Выберите услуги:",
+        reply_markup=markup,
+    )
+    return True
+
+
 def get_mode_by_time(current_dt: datetime | None = None) -> str:
     current = current_dt or now_local()
     hour = current.hour
@@ -1729,6 +1770,10 @@ async def handle_message(update: Update, context: CallbackContext):
     user = update.effective_user
     text = (update.message.text or "").strip()
     db_user_for_access, blocked, subscription_active = resolve_user_access(user.id, context)
+    if not db_user_for_access:
+        db_user_for_access = ensure_db_user(user)
+        if db_user_for_access:
+            subscription_active = is_subscription_active(db_user_for_access)
     if blocked:
         await update.message.reply_text("⛔ Доступ к боту закрыт администратором.")
         return
@@ -1860,52 +1905,26 @@ async def handle_message(update: Update, context: CallbackContext):
         await update.message.reply_text("Ок, ввод номера отменён.")
         # Продолжаем обработку выбранного пункта меню
 
-    # Ожидание номера машины
+    # Ожидание номера машины (FSM-подсказка, но не обязательна)
     if context.user_data.get('awaiting_car_number'):
-        # Проверяем валидность номера
-        is_valid, normalized_number, error_msg = validate_car_number(text)
-        
-        if not is_valid:
-            await update.message.reply_text(
-                f"❌ Ошибка: {error_msg}\n\n"
-                f"Введите номер ещё раз:"
-            )
-            return
-        
-        # Получаем активную смену
-        db_user = DatabaseManager.get_user(user.id)
-        if not db_user:
+        if not db_user_for_access:
             await update.message.reply_text("❌ Пользователь не найден. Напишите /start")
             context.user_data.pop('awaiting_car_number', None)
             return
-        active_shift = DatabaseManager.get_active_shift(db_user['id'])
-        
-        if not active_shift:
-            await update.message.reply_text(
-                "❌ Нет активной смены! Сначала откройте смену."
-            )
-            context.user_data.pop('awaiting_car_number', None)
-            await update.message.reply_text(
-        "Номер ТС можно указывать в любом формате:\n"
-        "Х340РУ797, х340ру или даже хру340.\n\n"
-        "Бот сам приведет номер к формату Х340РУ797, используя по умолчанию 797 регион"
-    )
+        if await handle_car_number_input(update, context, db_user_for_access, text):
             return
-        
-        # Добавляем машину
-        car_id = DatabaseManager.add_car(active_shift['id'], normalized_number)
-        
+        is_valid, _, error_msg = validate_car_number(text)
+        if not is_valid:
+            await update.message.reply_text(
+                f"❌ Ошибка: {error_msg}\n\nВведите номер ещё раз:"
+            )
+            return
         context.user_data.pop('awaiting_car_number', None)
-        context.user_data['current_car'] = car_id
-        
-        await update.message.reply_text(
-            f"🚗 Машина: {normalized_number}\n"
-            f"Выберите услуги:",
-            reply_markup=create_services_keyboard(car_id, 0, False, get_price_mode(context, db_user["id"]), db_user["id"])
-        )
+        await update.message.reply_text("❌ Нет активной смены! Сначала откройте смену.")
         return
 
     if context.user_data.get("awaiting_decade_goal"):
+
         raw_value = text.replace(" ", "").replace("₽", "")
         if not raw_value.isdigit():
             context.user_data.pop("awaiting_decade_goal", None)
@@ -2122,25 +2141,8 @@ async def handle_message(update: Update, context: CallbackContext):
             )
         return
     
-    if db_user_for_access:
-        active_shift = DatabaseManager.get_active_shift(db_user_for_access['id'])
-        if active_shift:
-            is_valid, normalized_number, _ = validate_car_number(text)
-            if is_valid:
-                car_id = DatabaseManager.add_car(active_shift['id'], normalized_number)
-                context.user_data['current_car'] = car_id
-                await update.message.reply_text(
-                    f"🚗 Машина: {normalized_number}\n"
-                    f"Выберите услуги:",
-                    reply_markup=create_services_keyboard(
-                        car_id,
-                        0,
-                        False,
-                        get_price_mode(context, db_user_for_access["id"]),
-                        db_user_for_access["id"],
-                    )
-                )
-                return
+    if db_user_for_access and await handle_car_number_input(update, context, db_user_for_access, text):
+        return
 
     await update.message.reply_text(
         "Используйте кнопки меню для работы с ботом.\n"

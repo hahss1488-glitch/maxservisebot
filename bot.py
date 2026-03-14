@@ -3488,6 +3488,20 @@ async def _show_unified_profile_from_callback(query, context: CallbackContext, n
     await _render_profile_view(query.message, context, db_user, query.from_user.id, notice=notice)
 
 
+async def _replace_profile_message(query, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    try:
+        await query.edit_message_caption(caption=text[:1024], reply_markup=reply_markup)
+        return
+    except Exception:
+        pass
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+        return
+    except Exception:
+        pass
+    await query.message.reply_text(text, reply_markup=reply_markup)
+
+
 
 
 def build_profile_text(db_user: dict, telegram_id: int) -> str:
@@ -3532,19 +3546,17 @@ async def profile_change_name_callback(query, context):
     _clear_profile_waiting_flags(context)
     context.user_data["awaiting_profile_name"] = True
     prompt = "Введи новое имя для профиля и leaderboard (до 32 символов)."
-    try:
-        await query.edit_message_text(prompt)
-    except Exception:
-        await query.message.reply_text(prompt)
+    await _replace_profile_message(query, prompt)
 
 
 async def profile_avatar_upload_callback(query, context):
     logger.info("profile callback invoked action=profile_avatar_upload user_id=%s", query.from_user.id)
     _clear_profile_waiting_flags(context)
     context.user_data["awaiting_profile_avatar"] = True
-    await query.edit_message_text(
+    await _replace_profile_message(
+        query,
         "Отправь фото или файл-картинку одним сообщением — сохраним как кастомный аватар.\n"
-        "Поддерживаются JPG/PNG/WebP до 10 МБ."
+        "Поддерживаются JPG/PNG/WebP до 10 МБ.",
     )
     logger.info("profile avatar mode enabled user_id=%s", query.from_user.id)
 
@@ -3571,8 +3583,9 @@ async def profile_change_rank_prefix_callback(query, context):
         return
     _clear_profile_waiting_flags(context)
     context.user_data["awaiting_profile_rank_prefix"] = True
-    await query.edit_message_text(
-        f"Введи новый префикс ранга (любой текст до {RANK_PREFIX_MAX_LENGTH} символов)."
+    await _replace_profile_message(
+        query,
+        f"Введи новый префикс ранга (любой текст до {RANK_PREFIX_MAX_LENGTH} символов).",
     )
 
 

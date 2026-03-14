@@ -56,16 +56,16 @@ class LeaderboardLayout:
 
 
 BASE_LAYOUT = LeaderboardLayout(
-    period_box=Box(240, 258, 544, 42),
+    period_box=Box(240, 322, 544, 42),
     role_boxes={
-        1: Box(376, 495, 253, 72),
-        2: Box(375, 683, 253, 72),
-        3: Box(375, 871, 253, 72),
+        1: Box(406, 490, 220, 56),
+        2: Box(406, 678, 220, 56),
+        3: Box(406, 866, 220, 56),
     },
     name_boxes={
-        1: Box(382, 568, 340, 54),
-        2: Box(384, 756, 330, 54),
-        3: Box(384, 944, 330, 54),
+        1: Box(382, 582, 320, 50),
+        2: Box(384, 770, 310, 50),
+        3: Box(384, 958, 310, 50),
     },
     amount_boxes={
         1: Box(692, 489, 236, 92),
@@ -83,9 +83,9 @@ BASE_LAYOUT = LeaderboardLayout(
     updated_small_box=Box(97, 1238, 430, 52),
     updated_bottom_box=Box(287, 1410, 450, 46),
     avatar_centers={
-        1: (261, 542),
-        2: (253, 730),
-        3: (252, 918),
+        1: (268, 542),
+        2: (260, 730),
+        3: (259, 918),
     },
     avatar_diameter=146,
 )
@@ -251,6 +251,15 @@ def _initials(name: str) -> str:
     return (tokens[0][0] + tokens[1][0]).upper()
 
 
+def _clean_display_name(raw: Any, fallback: str) -> str:
+    value = " ".join(str(raw or "").split())
+    lowered = value.lower()
+    blocked = {"👤 профиль", "профиль", "profile", "👤profile", "👤"}
+    if not value or lowered in blocked:
+        return fallback
+    return value
+
+
 def _load_avatar_circle(path: str | None, diameter: int, initials: str) -> Image.Image:
     if path:
         p = Path(path)
@@ -342,18 +351,18 @@ def render_leaderboard(payload: dict[str, Any]) -> Path:
 
     for place in (1, 2, 3):
         row = by_place.get(place, {})
-        name_raw = str(row.get("name") or "Неизвестный герой")
+        name_raw = _clean_display_name(row.get("name"), "Неизвестный герой")
         avatar_img = _load_avatar_circle(str(row.get("avatar_path") or "") or None, layout.avatar_diameter, _initials(name_raw))
         center = layout.avatar_centers[place]
         canvas.alpha_composite(avatar_img, (center[0] - layout.avatar_diameter // 2, center[1] - layout.avatar_diameter // 2))
 
         role = str(row.get("rank_prefix") or row.get("rank_text") or "PLAYER").upper()
-        role_text, role_font = fit_text_to_width(draw, role, _scaled(210, canvas.width / BASE_SIZE[0]), 30, 24, "bold")
+        role_text, role_font = fit_text_to_width(draw, role, _scaled(190, canvas.width / BASE_SIZE[0]), 24, 20, "bold")
         draw_text_aligned(draw, layout.role_boxes[place], role_text, role_font, RANK_COLORS.get(place, (242, 245, 255, 255)), align="center", valign="middle")
 
         name_box = layout.name_boxes[place]
-        name_size = {1: 44, 2: 42, 3: 40}[place]
-        name_text, name_font = fit_text_to_width(draw, name_raw, name_box.width, _scaled(name_size, canvas.width / BASE_SIZE[0]), _scaled(32, canvas.width / BASE_SIZE[0]), "extrabold")
+        name_size = {1: 40, 2: 38, 3: 36}[place]
+        name_text, name_font = fit_text_to_width(draw, name_raw, name_box.width, _scaled(name_size, canvas.width / BASE_SIZE[0]), _scaled(30, canvas.width / BASE_SIZE[0]), "extrabold")
         draw_text_aligned(draw, name_box, name_text, name_font, (250, 252, 255, 255), align="left", valign="middle", padding_left=_scaled(2, canvas.width / BASE_SIZE[0]))
 
         amount_box = layout.amount_boxes[place]
@@ -372,7 +381,7 @@ def render_leaderboard(payload: dict[str, Any]) -> Path:
 
     for place in (4, 5):
         row = by_place.get(place, {})
-        name = str(row.get("name") or "—")
+        name = _clean_display_name(row.get("name"), "—")
         amount = _format_amount(row)
 
         name_box = layout.row_name_boxes[place]

@@ -62,40 +62,40 @@ CONFIG = RenderConfig(
     image_size=(1024, 1536),
     top_layouts={
         1: TopPlaceLayout(
-            avatar_box=(172, 312, 328, 468),
-            name_xy=(380, 410),
+            avatar_box=(170, 468, 326, 624),
+            name_xy=(380, 605),
             name_max_width=420,
             name_font_size=48,
             name_color=(245, 245, 245),
-            money_center=(860, 390),
+            money_center=(860, 542),
             money_font_size=42,
             money_color=(255, 210, 120),
         ),
         2: TopPlaceLayout(
-            avatar_box=(180, 515, 320, 655),
-            name_xy=(380, 610),
+            avatar_box=(180, 659, 320, 799),
+            name_xy=(380, 792),
             name_max_width=420,
             name_font_size=48,
             name_color=(245, 245, 245),
-            money_center=(860, 585),
+            money_center=(860, 730),
             money_font_size=42,
             money_color=(210, 220, 255),
-            prefix_center=(520, 560),
+            prefix_center=(520, 730),
             prefix_font_size=30,
             prefix_min_font_size=22,
             prefix_max_width=280,
             prefix_color=(130, 200, 255),
         ),
         3: TopPlaceLayout(
-            avatar_box=(180, 710, 320, 850),
-            name_xy=(380, 805),
+            avatar_box=(180, 847, 320, 987),
+            name_xy=(380, 980),
             name_max_width=420,
             name_font_size=48,
             name_color=(245, 245, 245),
-            money_center=(860, 780),
+            money_center=(860, 918),
             money_font_size=42,
             money_color=(255, 200, 150),
-            prefix_center=(520, 755),
+            prefix_center=(520, 918),
             prefix_font_size=30,
             prefix_min_font_size=22,
             prefix_max_width=280,
@@ -104,26 +104,26 @@ CONFIG = RenderConfig(
     },
     compact_layouts={
         4: CompactPlaceLayout(
-            place_xy=(120, 965),
+            place_xy=(120, 1080),
             place_font_size=44,
             place_color=(245, 245, 245),
-            name_xy=(200, 965),
+            name_xy=(200, 1080),
             name_max_width=520,
             name_font_size=42,
             name_color=(245, 245, 245),
-            money_center=(860, 970),
+            money_center=(860, 1080),
             money_font_size=40,
             money_color=(220, 230, 255),
         ),
         5: CompactPlaceLayout(
-            place_xy=(120, 1095),
+            place_xy=(120, 1176),
             place_font_size=44,
             place_color=(245, 245, 245),
-            name_xy=(200, 1095),
+            name_xy=(200, 1176),
             name_max_width=520,
             name_font_size=42,
             name_color=(245, 245, 245),
-            money_center=(860, 1100),
+            money_center=(860, 1176),
             money_font_size=40,
             money_color=(220, 230, 255),
         ),
@@ -433,7 +433,7 @@ def render_top_player(
     name_font = load_font(layout.name_font_size, weight="bold", fonts_dir=fonts_dir)
     fitted_name = fit_text_to_width(draw, name, name_font, layout.name_max_width)
     if fitted_name:
-        draw.text(layout.name_xy, fitted_name, fill=layout.name_color, font=name_font)
+        draw.text(layout.name_xy, fitted_name, fill=layout.name_color, font=name_font, anchor="lm")
 
     money_text = format_money(player.get("money"))
     money_font = load_font(layout.money_font_size, weight="bold", fonts_dir=fonts_dir)
@@ -449,14 +449,11 @@ def render_compact_player(
     """Render compact 4th/5th row with place number, name and amount."""
 
     layout = CONFIG.compact_layouts[place]
-    place_font = load_font(layout.place_font_size, weight="bold", fonts_dir=fonts_dir)
-    draw.text(layout.place_xy, f"{place}", fill=layout.place_color, font=place_font)
-
     name = _clean_name(player.get("name"))
     name_font = load_font(layout.name_font_size, weight="bold", fonts_dir=fonts_dir)
     fitted_name = fit_text_to_width(draw, name, name_font, layout.name_max_width)
     if fitted_name:
-        draw.text(layout.name_xy, fitted_name, fill=layout.name_color, font=name_font)
+        draw.text(layout.name_xy, fitted_name, fill=layout.name_color, font=name_font, anchor="lm")
 
     money_text = format_money(player.get("money"))
     money_font = load_font(layout.money_font_size, weight="bold", fonts_dir=fonts_dir)
@@ -481,6 +478,29 @@ def _safe_open_template(template_path: str | Path) -> Image.Image:
     return image
 
 
+
+def _title_region_has_text(base: Image.Image) -> bool:
+    """Return True when template already contains a visible top title."""
+
+    region = base.crop((300, 170, 724, 370)).convert("L")
+    histogram = region.histogram()
+    bright_pixels = sum(histogram[170:])
+    return bright_pixels > 1800
+
+
+def render_header_title(
+    base: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    fonts_dir: str | Path | None = None,
+) -> None:
+    """Draw "ТОП ГЕРОЕВ" between laurels only when template does not have this text."""
+
+    if _title_region_has_text(base):
+        return
+    title_font = load_font(62, weight="bold", fonts_dir=fonts_dir)
+    draw_centered_text(draw, (512, 250), "ТОП ГЕРОЕВ", title_font, (245, 245, 245))
+
+
 def render_leaderboard(
     players: list[PlayerInput],
     output_path: str | Path | None = None,
@@ -493,6 +513,8 @@ def render_leaderboard(
     base = _safe_open_template(template_path)
     draw = ImageDraw.Draw(base)
     prepared_players = _normalize_players(players)
+
+    render_header_title(base, draw, fonts_dir=fonts_dir)
 
     for place in (1, 2, 3):
         render_top_player(base, draw, place, prepared_players[place - 1], fonts_dir=fonts_dir)

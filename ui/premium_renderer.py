@@ -5,14 +5,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from ui.dashboard_renderer import (
-    DashboardRenderer,
-    LeaderRow,
-    LeaderboardData,
-    MainDashboardData,
-    to_png_bytes,
-)
 from ui.renderers.dashboard_renderer import render_dashboard
+from ui.renderers.leaderboard_renderer import render_leaderboard
 
 TOKENS = {
     "TEXT_PRIMARY": (243, 247, 255, 255),
@@ -21,7 +15,13 @@ TOKENS = {
     "NEGATIVE": (233, 99, 99, 255),
 }
 
-_renderer = DashboardRenderer()
+
+
+RANK_STYLES = {
+    1: ("ЛЕГЕНДА", "gold"),
+    2: ("PRO", "blue"),
+    3: ("ELITE", "orange"),
+}
 
 
 def format_money(v: Any) -> str:
@@ -50,6 +50,33 @@ def _trend_payload(payload: dict[str, Any]) -> tuple[str, tuple[int, int, int, i
     if pace.startswith("-"):
         return f"{pace} к прошлой декаде" if "%" in pace else pace, (255, 172, 96, 255)
     return pace, (221, 227, 238, 255)
+
+
+def _leaderboard_payload(decade_title: str, decade_leaders: list[dict], updated_at: datetime | None) -> dict[str, Any]:
+    leaders = []
+    for i in range(1, 6):
+        src = decade_leaders[i - 1] if i - 1 < len(decade_leaders) else {}
+        amount = format_money(src.get("total_amount") or 0)
+        row = {
+            "place": i,
+            "name": str(src.get("name") or "—"),
+            "amount": amount,
+        }
+        if i <= 3:
+            rank_text, rank_style = RANK_STYLES[i]
+            row.update(
+                {
+                    "rank_text": str(src.get("rank_text") or rank_text),
+                    "rank_style": str(src.get("rank_style") or rank_style),
+                    "avatar_path": str(src.get("avatar_path") or ""),
+                }
+            )
+        leaders.append(row)
+    return {
+        "period_text": decade_title,
+        "updated_text": updated_at or datetime.now(),
+        "leaders": leaders,
+    }
 
 
 def render_dashboard_image_bytes(mode: str, payload: dict) -> BytesIO:
@@ -95,16 +122,9 @@ def render_leaderboard_image_bytes(
     top3_avatars: dict[int, object] | None = None,
     updated_at: datetime | None = None,
 ) -> BytesIO:
-    leaders = [
-        LeaderRow(
-            rank=i,
-            name=str(row.get("name", "—")),
-            earnings=int(row.get("total_amount") or 0),
-            shifts=int(row.get("shifts_count") or row.get("shift_count") or 0),
-            cars=int(row.get("cars_count") or 0),
-            avatar_path=str(row.get("avatar_path") or "") or None,
-        )
-        for i, row in enumerate(decade_leaders, start=1)
-    ]
-    data = LeaderboardData("Лидерборд", decade_title, updated_at or datetime.now(), leaders, highlight_name)
-    return to_png_bytes(_renderer.render_leaderboard(data), "leaderboard.png")
+    payload = _leaderboard_payload(decade_title, decade_leaders, updated_at)
+    path = render_leaderboard(payload)
+    stream = BytesIO(Path(path).read_bytes())
+    stream.name = "leaderboard.png"
+    stream.seek(0)
+    return stream

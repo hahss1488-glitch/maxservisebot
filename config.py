@@ -4,6 +4,7 @@ BOT_TOKEN = os.getenv("SERVICEBOT_TOKEN", "")
 
 BASE_DIR = Path(__file__).resolve().parent
 DASHBOARD_TEMPLATE_PATH = BASE_DIR / "ui" / "assets" / "dashboard" / "dashboard_template_v2.png"
+LEADERBOARD_TEMPLATE_PATH = BASE_DIR / "ui" / "assets" / "leaderboard" / "leaderboard_template_v2.png"
 
 # Дефолтный регион для автодополнения номеров
 DEFAULT_REGION = "797"

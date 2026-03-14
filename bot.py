@@ -45,7 +45,14 @@ from exports import create_decade_pdf, create_decade_xlsx, create_month_xlsx
 from services.planning import compute_plan_metrics
 from services.dashboard_state_service import DashboardStateService
 from services.fast_input_service import parse_fast_input, normalize_alias, is_valid_alias
-from services.avatar_service import save_custom_avatar, get_effective_avatar, get_avatar_source, reset_avatar, build_avatar_preview
+from services.avatar_service import (
+    build_avatar_preview,
+    get_avatar_source,
+    get_effective_avatar,
+    invalidate_avatar_cache,
+    reset_avatar,
+    save_custom_avatar,
+)
 from ui.nav import push_screen, pop_screen, get_current_screen, Screen
 from ui.premium_renderer import TOKENS, format_money as format_money_glass, render_dashboard_image_bytes, render_leaderboard_image_bytes
 
@@ -405,6 +412,7 @@ async def _consume_profile_avatar_upload(update: Update, context: CallbackContex
 
     try:
         avatar_path = save_custom_avatar(db_user["id"], payload or b"", CUSTOM_AVATAR_DIR)
+        invalidate_avatar_cache(db_user["id"], AVATAR_CACHE_DIR)
         context.user_data.pop("awaiting_profile_avatar", None)
         await message.reply_text("✅ Кастомный аватар сохранён и применён.")
         preview = build_avatar_preview(str(avatar_path))
@@ -3468,7 +3476,7 @@ async def profile_avatar_reset_callback(query, context):
     if not db_user:
         await query.edit_message_text("❌ Пользователь не найден")
         return
-    source = reset_avatar(db_user["id"])
+    source = reset_avatar(db_user["id"], CUSTOM_AVATAR_DIR)
     context.user_data.pop("awaiting_profile_avatar", None)
     text = build_profile_text(db_user, query.from_user.id) + f"\n\n♻️ Аватар сброшен. Текущий источник: {source}."
     kb = build_profile_keyboard(db_user, query.from_user.id)

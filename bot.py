@@ -5721,6 +5721,7 @@ async def ensure_startup_once() -> None:
 
 
 def _resolve_chat_id(message_payload: dict[str, Any]) -> int:
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
     _, target_id = resolve_response_target(message_payload)
     return int(target_id)
 
@@ -5797,15 +5798,64 @@ def _build_update_from_max(payload: dict[str, Any]) -> Update:
         )
         return Update(effective_user=user, effective_chat=chat, callback_query=query)
 
+=======
+    recipient = message_payload.get("recipient") or {}
+    sender = message_payload.get("sender") or {}
+    chat_id = recipient.get("chat_id") or recipient.get("user_id") or sender.get("user_id") or 0
+    return int(chat_id or 0)
+
+
+def _build_update_from_max(payload: dict[str, Any]) -> Update:
+    update_type = str(payload.get("update_type") or "")
+    message_payload = payload.get("message") or {}
+    sender = message_payload.get("sender") or {}
+    user_id = int(sender.get("user_id") or 0)
+    user = MaxUser(
+        user_id=user_id,
+        first_name=str(sender.get("first_name") or sender.get("name") or ""),
+        last_name=str(sender.get("last_name") or ""),
+        username=str(sender.get("username") or ""),
+    )
+    chat_id = _resolve_chat_id(message_payload)
+    chat = MaxChat(chat_id)
+    body = message_payload.get("body") or {}
+    text = str(body.get("text") or "")
+    attachments = body.get("attachments") or []
+    message = MaxIncomingMessage(
+        bot=_MAX_BOT,
+        message_id=int(message_payload.get("message_id") or 0),
+        chat_id=chat_id,
+        from_user=user,
+        text=text,
+        attachments=attachments,
+    )
+
+    if update_type == "message_callback":
+        callback = payload.get("callback") or {}
+        callback_payload = str(callback.get("payload") or callback.get("data") or "")
+        callback_id = str(callback.get("callback_id") or "")
+        query = MaxCallbackQuery(
+            bot=_MAX_BOT,
+            from_user=user,
+            message=message,
+            data=callback_payload,
+            callback_id=callback_id,
+        )
+        return Update(effective_user=user, effective_chat=chat, callback_query=query)
+
+>>>>>>> main
     return Update(effective_user=user, effective_chat=chat, message=message)
 
 
 async def process_max_update(payload: dict[str, Any]) -> None:
     await ensure_startup_once()
     update = _build_update_from_max(payload)
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
     if not update.effective_chat or int(update.effective_chat.id or 0) <= 0:
         logger.warning("skip update without response target update_type=%s", payload.get("update_type"))
         return
+=======
+>>>>>>> main
     user_id = int(update.effective_user.id if update.effective_user else 0)
     user_data = state_manager.get_user_state(user_id) if user_id else {}
     context = CallbackContext(bot=_MAX_BOT, application=_MAX_APP, user_data=user_data)

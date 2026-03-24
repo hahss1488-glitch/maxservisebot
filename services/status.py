@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
-from telegram import Update
-from telegram.ext import CallbackContext
+from max_runtime import Update, CallbackContext
 
 
 async def send_status(update: Update, context: CallbackContext, text: str, *, reply_markup=None):

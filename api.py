@@ -1,16 +1,17 @@
 import logging
 import os
 import re
-from urllib.parse import urlencode
-from urllib.request import urlopen
+import asyncio
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from config import BOT_TOKEN, SERVICES
 from database import DatabaseManager, get_connection, init_database
+from max_api import MaxClient
+from bot import process_max_update, ensure_startup_once, notify_subscription_events, notify_shift_close_prompts, scheduled_period_reports
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -19,6 +20,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ServiceBot API", version="1.0.0")
+max_client = MaxClient(BOT_TOKEN)
+MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET", "")
+_bg_tasks: list[asyncio.Task] = []
 
 FAST_SERVICE_ALIASES = {
     1: ["проверка", "пров", "провер", "чек"],
@@ -31,7 +35,8 @@ FAST_SERVICE_ALIASES = {
 class TaskPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    chat_id: int
+    user_id: int | None = None
+    chat_id: int | None = None
     car_id: str
     task_type: str | int
     timestamp: int
@@ -44,6 +49,10 @@ class TaskPayload(BaseModel):
         if not normalized:
             raise ValueError("car_id_required")
         return normalized
+
+    @property
+    def actor_id(self) -> int:
+        return int(self.user_id or self.chat_id or 0)
 
 
 def plain_service_name(name: str) -> str:
@@ -91,19 +100,15 @@ def is_duplicate_recent(car_id: int, service_id: int, ttl_hours: int) -> bool:
     return row is not None
 
 
-def maybe_notify_telegram(chat_id: int, car_number: str, service_name: str, price: int) -> None:
-    if os.getenv("NOTIFY_TELEGRAM", "0") != "1":
-        return
-    if not BOT_TOKEN:
-        logger.warning("NOTIFY_TELEGRAM=1, but BOT_TOKEN is empty")
+def maybe_notify_max(user_id: int, car_number: str, service_name: str, price: int) -> None:
+    if os.getenv("NOTIFY_MAX", "1") != "1":
         return
 
     text = f"✅ Добавлена услуга: {service_name}\n🚗 {car_number}\n💰 {price}₽"
-    payload = urlencode({"chat_id": chat_id, "text": text}).encode("utf-8")
     try:
-        urlopen(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=payload, timeout=3)
+        max_client.send_message(user_id=user_id, text=text)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Telegram notify failed: %s", exc)
+        logger.warning("MAX notify failed: %s", exc)
 
 
 @app.exception_handler(RequestValidationError)
@@ -121,8 +126,52 @@ async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     init_database()
+    await ensure_startup_once()
+    _bg_tasks.append(asyncio.create_task(_run_hourly_jobs()))
+    _bg_tasks.append(asyncio.create_task(_run_daily_report_jobs()))
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    for task in _bg_tasks:
+        task.cancel()
+    _bg_tasks.clear()
+
+
+async def _run_hourly_jobs() -> None:
+    while True:
+        try:
+            await notify_subscription_events(_APP_PROXY)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hourly subscription job failed: %s", exc)
+        try:
+            await notify_shift_close_prompts(_APP_PROXY)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hourly shift prompt job failed: %s", exc)
+        await asyncio.sleep(3600)
+
+
+class _AsyncBotProxy:
+    async def send_message(self, *, chat_id: int, text: str, reply_markup=None):
+        attachments = []
+        if reply_markup is not None:
+            from max_runtime import _serialize_markup  # type: ignore
+            attachments = _serialize_markup(reply_markup)
+        max_client.send_message(chat_id=chat_id, text=text, attachments=attachments)
+
+
+_APP_PROXY = type("_AppProxy", (), {"bot": _AsyncBotProxy()})()
+
+
+async def _run_daily_report_jobs() -> None:
+    while True:
+        try:
+            await scheduled_period_reports(_APP_PROXY)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("daily report job failed: %s", exc)
+        await asyncio.sleep(3600)
 
 
 @app.post("/api/task")
@@ -131,7 +180,11 @@ async def create_task(payload: TaskPayload) -> JSONResponse:
     if required_device_key and payload.device_key != required_device_key:
         return JSONResponse(status_code=401, content={"status": "error", "reason": "unauthorized"})
 
-    user = DatabaseManager.get_user(payload.chat_id)
+    actor_id = payload.actor_id
+    if actor_id <= 0:
+        return JSONResponse(status_code=422, content={"status": "error", "reason": "user_id_required"})
+
+    user = DatabaseManager.get_user(actor_id)
     if not user:
         return JSONResponse(status_code=404, content={"status": "error", "reason": "user_not_registered"})
 
@@ -166,6 +219,14 @@ async def create_task(payload: TaskPayload) -> JSONResponse:
     price = int(service.get(price_key, 0) or 0)
 
     DatabaseManager.add_service_to_car(car_db_id, service_id, service_name, price)
-    maybe_notify_telegram(payload.chat_id, car_number, service_name, price)
+    maybe_notify_max(actor_id, car_number, service_name, price)
 
+    return JSONResponse(status_code=200, content={"status": "ok"})
+
+
+@app.post("/max/webhook")
+async def max_webhook(update: dict, x_max_bot_api_secret: str | None = Header(default=None)) -> JSONResponse:
+    if MAX_WEBHOOK_SECRET and x_max_bot_api_secret != MAX_WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="invalid_secret")
+    await process_max_update(update)
     return JSONResponse(status_code=200, content={"status": "ok"})

@@ -21,23 +21,23 @@ from dataclasses import dataclass
 
 from PIL import Image, UnidentifiedImageError
 
-from telegram import (
+from max_runtime import (
     Update,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton,
     InputMediaPhoto,
-)
-from telegram.error import BadRequest
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
     CallbackContext,
-    filters,
+    BadRequest,
+    MaxBot,
+    MaxChat,
+    MaxIncomingMessage,
+    MaxCallbackQuery,
+    MaxUser,
 )
+from max_api import MaxClient
+from state_manager import state_manager
 
 from config import BOT_TOKEN, SERVICES, validate_car_number
 from database import DatabaseManager, init_database, DB_PATH
@@ -5239,7 +5239,7 @@ def get_previous_decade_period(target_day: date | None = None) -> tuple[date, da
     return date(current.year, current.month, 11), date(current.year, current.month, 20), current.year, current.month, 2
 
 
-async def notify_decade_change_if_needed(application: Application, db_user: dict):
+async def notify_decade_change_if_needed(application: Any, db_user: dict):
     _, _, _, current_key, _ = get_decade_period(now_local().date())
     last_key = DatabaseManager.get_last_decade_notified(db_user["id"])
     if not last_key:
@@ -5280,7 +5280,7 @@ async def export_month_xlsx_callback(query, context, data):
         )
 
 
-async def notify_month_end_if_needed(application: Application, db_user: dict):
+async def notify_month_end_if_needed(application: Any, db_user: dict):
     now_dt = now_local()
     if now_dt.day != 1:
         return
@@ -5309,12 +5309,12 @@ async def notify_month_end_if_needed(application: Application, db_user: dict):
         DatabaseManager.set_app_content(sent_key, month_key)
 
 
-async def send_period_reports_for_user(application: Application, db_user: dict):
+async def send_period_reports_for_user(application: Any, db_user: dict):
     await notify_decade_change_if_needed(application, db_user)
     await notify_month_end_if_needed(application, db_user)
 
 
-async def notify_subscription_events(application: Application):
+async def notify_subscription_events(application: Any):
     today = now_local().date()
     users = DatabaseManager.get_all_users_with_stats()
     for row in users:
@@ -5367,7 +5367,7 @@ async def scheduled_subscription_notifications_job(context: CallbackContext):
     await notify_subscription_events(context.application)
 
 
-async def notify_shift_close_prompts(application: Application):
+async def notify_shift_close_prompts(application: Any):
     now_dt = now_local()
     users = DatabaseManager.get_all_users_with_stats()
     for row in users:
@@ -5412,7 +5412,7 @@ async def scheduled_shift_close_prompts_job(context: CallbackContext):
     await notify_shift_close_prompts(context.application)
 
 
-async def scheduled_period_reports(application: Application):
+async def scheduled_period_reports(application: Any):
     users = DatabaseManager.get_all_users_with_stats()
     for row in users:
         db_user = DatabaseManager.get_user_by_id(int(row["id"]))
@@ -5648,7 +5648,7 @@ async def error_handler(update: Update, context: CallbackContext):
         except Exception:
             pass
 
-async def on_startup(application: Application):
+async def on_startup(application: Any):
     if application.job_queue:
         application.job_queue.run_daily(
             scheduled_period_reports_job,
@@ -5695,36 +5695,102 @@ async def on_startup(application: Application):
 
 # ========== ГЛАВНАЯ ФУНКЦИЯ ==========
 
-def main():
-    """Запуск бота"""
-    application = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
-    
-    # Регистрация команд
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("menu", menu_command))
-    
-    # Обработчик callback-кнопок
-    application.add_handler(CallbackQueryHandler(handle_callback))
-    
-    # Обработчик медиа и текстовых сообщений
-    application.add_handler(MessageHandler((filters.PHOTO | filters.VIDEO | filters.Document.IMAGE) & ~filters.COMMAND, handle_media_message))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, safe_handle_message))
-    
-    # Обработчик ошибок
-    application.add_error_handler(error_handler)
-    
-    # Запуск бота
-    logger.info(f"🤖 Бот запускается... Версия: {APP_VERSION}")
-    print("=" * 60)
-    print("🚀 БОТ ДЛЯ УЧЁТА УСЛУГ - УПРОЩЕННАЯ ВЕРСИЯ")
-    print(f"🔖 Версия: {APP_VERSION}")
-    print(f"🛠 Обновлено: {APP_UPDATED_AT}")
-    print(f"🕒 Часовой пояс: {APP_TIMEZONE}")
-    print("✅ Просто работает")
-    print("=" * 60)
-    
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+class MaxApplication:
+    def __init__(self, bot: MaxBot):
+        self.bot = bot
+        self.job_queue = None
 
 
-if __name__ == "__main__":
-    main()
+_MAX_CLIENT = MaxClient(BOT_TOKEN)
+_MAX_BOT = MaxBot(_MAX_CLIENT)
+_MAX_APP = MaxApplication(_MAX_BOT)
+_STARTUP_DONE = False
+
+
+async def ensure_startup_once() -> None:
+    global _STARTUP_DONE
+    if _STARTUP_DONE:
+        return
+    await on_startup(_MAX_APP)
+    _STARTUP_DONE = True
+
+
+def _resolve_chat_id(message_payload: dict[str, Any]) -> int:
+    recipient = message_payload.get("recipient") or {}
+    sender = message_payload.get("sender") or {}
+    chat_id = recipient.get("chat_id") or recipient.get("user_id") or sender.get("user_id") or 0
+    return int(chat_id or 0)
+
+
+def _build_update_from_max(payload: dict[str, Any]) -> Update:
+    update_type = str(payload.get("update_type") or "")
+    message_payload = payload.get("message") or {}
+    sender = message_payload.get("sender") or {}
+    user_id = int(sender.get("user_id") or 0)
+    user = MaxUser(
+        user_id=user_id,
+        first_name=str(sender.get("first_name") or sender.get("name") or ""),
+        last_name=str(sender.get("last_name") or ""),
+        username=str(sender.get("username") or ""),
+    )
+    chat_id = _resolve_chat_id(message_payload)
+    chat = MaxChat(chat_id)
+    body = message_payload.get("body") or {}
+    text = str(body.get("text") or "")
+    attachments = body.get("attachments") or []
+    message = MaxIncomingMessage(
+        bot=_MAX_BOT,
+        message_id=int(message_payload.get("message_id") or 0),
+        chat_id=chat_id,
+        from_user=user,
+        text=text,
+        attachments=attachments,
+    )
+
+    if update_type == "message_callback":
+        callback = payload.get("callback") or {}
+        callback_payload = str(callback.get("payload") or callback.get("data") or "")
+        callback_id = str(callback.get("callback_id") or "")
+        query = MaxCallbackQuery(
+            bot=_MAX_BOT,
+            from_user=user,
+            message=message,
+            data=callback_payload,
+            callback_id=callback_id,
+        )
+        return Update(effective_user=user, effective_chat=chat, callback_query=query)
+
+    return Update(effective_user=user, effective_chat=chat, message=message)
+
+
+async def process_max_update(payload: dict[str, Any]) -> None:
+    await ensure_startup_once()
+    update = _build_update_from_max(payload)
+    user_id = int(update.effective_user.id if update.effective_user else 0)
+    user_data = state_manager.get_user_state(user_id) if user_id else {}
+    context = CallbackContext(bot=_MAX_BOT, application=_MAX_APP, user_data=user_data)
+
+    try:
+        if update.callback_query:
+            await handle_callback(update, context)
+            return
+
+        msg = update.message
+        if not msg:
+            return
+        has_media = bool(msg.photo or msg.video or msg.document)
+        if has_media:
+            await handle_media_message(update, context)
+            if not msg.text:
+                return
+        text = (msg.text or "").strip()
+        if text == "/start":
+            await start_command(update, context)
+            return
+        if text == "/menu":
+            await menu_command(update, context)
+            return
+        await safe_handle_message(update, context)
+    except Exception as exc:
+        context.error = exc
+        await error_handler(update, context)

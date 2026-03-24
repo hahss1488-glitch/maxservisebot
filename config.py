@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-BOT_TOKEN = os.getenv("SERVICEBOT_TOKEN", "")
+BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", os.getenv("SERVICEBOT_TOKEN", ""))
 
 BASE_DIR = Path(__file__).resolve().parent
 DASHBOARD_TEMPLATE_PATH = BASE_DIR / "ui" / "assets" / "dashboard" / "dashboard_template_v2.png"

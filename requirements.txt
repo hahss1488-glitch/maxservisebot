@@ -2,3 +2,4 @@ Pillow==10.4.0
 fastapi
 uvicorn[standard]
 pydantic
+requests

@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+import logging
 
 from max_api import MaxClient, MaxApiError
 
+logger = logging.getLogger(__name__)
 
 class BadRequest(Exception):
     pass
@@ -76,8 +78,9 @@ class MaxUser:
 
 
 class MaxChat:
-    def __init__(self, chat_id: int):
+    def __init__(self, chat_id: int, target_type: str = "chat"):
         self.id = int(chat_id)
+        self.target_type = target_type
 
 
 class MaxBot:
@@ -85,30 +88,40 @@ class MaxBot:
         self.client = client
         self._incoming_files: dict[str, str] = {}
 
-    async def send_message(self, *, chat_id: int, text: str, reply_markup=None):
-        resp = self.client.send_message(chat_id=chat_id, text=text, attachments=_serialize_markup(reply_markup))
-        return MaxSentMessage(self, chat_id, int(resp.get("message_id", 0)), text)
+    async def send_message(self, *, chat_id: int | None = None, user_id: int | None = None, text: str, reply_markup=None):
+        if chat_id is None and user_id is None:
+            raise BadRequest("send_message requires chat_id or user_id")
+        resp = self.client.send_message(chat_id=chat_id, user_id=user_id, text=text, attachments=_serialize_markup(reply_markup))
+        target_type = "chat" if chat_id is not None else "user"
+        target_id = int(chat_id if chat_id is not None else user_id or 0)
+        return MaxSentMessage(self, target_id, int(resp.get("message_id", 0)), text, target_type=target_type)
 
-    async def send_photo(self, *, chat_id: int, photo: Any, filename: str = "image.jpg", caption: str = "", reply_markup=None):
+    async def send_photo(self, *, chat_id: int | None = None, user_id: int | None = None, photo: Any, filename: str = "image.jpg", caption: str = "", reply_markup=None):
         content = _read_bytes(photo)
         token = self.client.upload_bytes(content, filename=filename, mime="image/jpeg")
         attachments = [{"type": "image", "payload": {"token": token}}] + _serialize_markup(reply_markup)
-        resp = self.client.send_message(chat_id=chat_id, text=caption or "", attachments=attachments)
-        return MaxSentMessage(self, chat_id, int(resp.get("message_id", 0)), caption)
+        resp = self.client.send_message(chat_id=chat_id, user_id=user_id, text=caption or "", attachments=attachments)
+        target_type = "chat" if chat_id is not None else "user"
+        target_id = int(chat_id if chat_id is not None else user_id or 0)
+        return MaxSentMessage(self, target_id, int(resp.get("message_id", 0)), caption, target_type=target_type)
 
-    async def send_video(self, *, chat_id: int, video: Any, caption: str = ""):
+    async def send_video(self, *, chat_id: int | None = None, user_id: int | None = None, video: Any, caption: str = ""):
         content = _read_bytes(video)
         token = self.client.upload_bytes(content, filename="video.mp4", mime="video/mp4")
         attachments = [{"type": "video", "payload": {"token": token}}]
-        resp = self.client.send_message(chat_id=chat_id, text=caption or "", attachments=attachments)
-        return MaxSentMessage(self, chat_id, int(resp.get("message_id", 0)), caption)
+        resp = self.client.send_message(chat_id=chat_id, user_id=user_id, text=caption or "", attachments=attachments)
+        target_type = "chat" if chat_id is not None else "user"
+        target_id = int(chat_id if chat_id is not None else user_id or 0)
+        return MaxSentMessage(self, target_id, int(resp.get("message_id", 0)), caption, target_type=target_type)
 
-    async def send_document(self, *, chat_id: int, document: Any, filename: str = "file.bin", caption: str = ""):
+    async def send_document(self, *, chat_id: int | None = None, user_id: int | None = None, document: Any, filename: str = "file.bin", caption: str = ""):
         content = _read_bytes(document)
         token = self.client.upload_bytes(content, filename=filename)
         attachments = [{"type": "file", "payload": {"token": token, "name": filename}}]
-        resp = self.client.send_message(chat_id=chat_id, text=caption or "", attachments=attachments)
-        return MaxSentMessage(self, chat_id, int(resp.get("message_id", 0)), caption)
+        resp = self.client.send_message(chat_id=chat_id, user_id=user_id, text=caption or "", attachments=attachments)
+        target_type = "chat" if chat_id is not None else "user"
+        target_id = int(chat_id if chat_id is not None else user_id or 0)
+        return MaxSentMessage(self, target_id, int(resp.get("message_id", 0)), caption, target_type=target_type)
 
     async def edit_message_text(self, *, chat_id: int, message_id: int, text: str, reply_markup=None):
         try:
@@ -123,16 +136,24 @@ class MaxBot:
             raise BadRequest(str(exc)) from exc
 
     async def pin_chat_message(self, *, chat_id: int, message_id: int, disable_notification: bool = True):
-        # MAX API pin endpoint differs; fallback no-op for compatibility.
+        logger.warning("pin_chat_message is not supported by current MAX adapter chat_id=%s message_id=%s", chat_id, message_id)
         return None
 
     async def unpin_chat_message(self, *, chat_id: int, message_id: int):
+        logger.warning("unpin_chat_message is not supported by current MAX adapter chat_id=%s message_id=%s", chat_id, message_id)
         return None
 
     async def copy_message(self, *, chat_id: int, from_chat_id: int, message_id: int, caption: str = ""):
+        logger.warning(
+            "copy_message is not directly supported by current MAX adapter, fallback to text notice chat_id=%s from_chat_id=%s message_id=%s",
+            chat_id,
+            from_chat_id,
+            message_id,
+        )
         return await self.send_message(chat_id=chat_id, text=caption or "📎 Вложение")
 
     async def get_user_profile_photos(self, user_id: int, limit: int = 1):
+        logger.info("get_user_profile_photos is unavailable in MAX API adapter user_id=%s", user_id)
         return type("_P", (), {"photos": []})()
 
     async def get_file(self, file_id: str):
@@ -147,23 +168,36 @@ class MaxBot:
 
 
 class MaxSentMessage:
-    def __init__(self, bot: MaxBot, chat_id: int, message_id: int, text: str = ""):
+    def __init__(self, bot: MaxBot, chat_id: int, message_id: int, text: str = "", target_type: str = "chat"):
         self.bot = bot
         self.chat_id = chat_id
         self.message_id = message_id
         self.text = text
+        self.target_type = target_type
 
     async def reply_text(self, text: str, reply_markup=None):
+        if self.target_type == "user":
+            return await self.bot.send_message(user_id=self.chat_id, text=text, reply_markup=reply_markup)
         return await self.bot.send_message(chat_id=self.chat_id, text=text, reply_markup=reply_markup)
 
     async def reply_photo(self, photo: Any, filename: str = "image.jpg", caption: str = "", reply_markup=None):
-        return await self.bot.send_photo(chat_id=self.chat_id, photo=photo, filename=filename, caption=caption, reply_markup=reply_markup)
+        kwargs = {"photo": photo, "filename": filename, "caption": caption, "reply_markup": reply_markup}
+        if self.target_type == "user":
+            return await self.bot.send_photo(user_id=self.chat_id, **kwargs)
+        return await self.bot.send_photo(chat_id=self.chat_id, **kwargs)
 
     async def reply_document(self, document: Any, filename: str = "file.bin", caption: str = ""):
-        return await self.bot.send_document(chat_id=self.chat_id, document=document, filename=filename, caption=caption)
+        kwargs = {"document": document, "filename": filename, "caption": caption}
+        if self.target_type == "user":
+            return await self.bot.send_document(user_id=self.chat_id, **kwargs)
+        return await self.bot.send_document(chat_id=self.chat_id, **kwargs)
 
     async def edit_text(self, text: str, reply_markup=None):
-        await self.bot.edit_message_text(chat_id=self.chat_id, message_id=self.message_id, text=text, reply_markup=reply_markup)
+        try:
+            await self.bot.edit_message_text(chat_id=self.chat_id, message_id=self.message_id, text=text, reply_markup=reply_markup)
+        except Exception:
+            logger.warning("edit_message_text failed, fallback to send new message message_id=%s", self.message_id)
+            await self.reply_text(text, reply_markup=reply_markup)
 
     async def delete(self):
         if self.message_id:
@@ -187,8 +221,8 @@ class MaxCallbackQuery:
 
 
 class MaxIncomingMessage(MaxSentMessage):
-    def __init__(self, *, bot: MaxBot, message_id: int, chat_id: int, from_user: MaxUser, text: str = "", attachments: list[dict[str, Any]] | None = None):
-        super().__init__(bot, chat_id, message_id, text)
+    def __init__(self, *, bot: MaxBot, message_id: int, chat_id: int, from_user: MaxUser, text: str = "", attachments: list[dict[str, Any]] | None = None, target_type: str = "chat"):
+        super().__init__(bot, chat_id, message_id, text, target_type=target_type)
         self.from_user = from_user
         self.text = text
         self.attachments = attachments or []
@@ -199,15 +233,31 @@ class MaxIncomingMessage(MaxSentMessage):
 
     def _parse_attachments(self):
         for att in self.attachments:
-            atype = att.get("type")
+            atype = str(att.get("type") or (att.get("attachment") or {}).get("type") or "").lower()
             payload = att.get("payload") or {}
-            token = payload.get("token") or payload.get("id") or ""
-            url = payload.get("url") or att.get("url") or ""
+            media = att.get("media") or {}
+            file_block = att.get("file") or {}
+            token = (
+                payload.get("token")
+                or payload.get("id")
+                or media.get("token")
+                or media.get("id")
+                or file_block.get("token")
+                or file_block.get("id")
+                or ""
+            )
+            url = (
+                payload.get("url")
+                or att.get("url")
+                or media.get("url")
+                or file_block.get("url")
+                or ""
+            )
             if token and url:
                 self.bot.remember_incoming_file(str(token), str(url))
-            if atype == "image":
+            if atype in {"image", "photo"}:
                 self.photo.append(type("_Photo", (), {"file_id": str(token)})())
-            elif atype == "video":
+            elif atype in {"video", "movie"}:
                 self.video = type("_Video", (), {"file_id": str(token), "mime_type": "video/mp4"})()
             elif atype in {"file", "document"}:
                 self.document = type("_Doc", (), {"file_id": str(token), "mime_type": payload.get("mime", "application/octet-stream")})()

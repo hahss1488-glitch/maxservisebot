@@ -9,6 +9,16 @@ pip install -r requirements.txt
 uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
+## Регистрация webhook в MAX
+
+1. Поднимите публичный HTTPS endpoint (`https://<host>/max/webhook`).
+2. Создайте подписку MAX webhook через `POST /subscriptions`.
+3. Передайте `secret` и установите тот же `MAX_WEBHOOK_SECRET` в env.
+4. Входящие запросы валидируются по заголовку `X-Max-Bot-Api-Secret`.
+
+=======
+>>>>>>> main
 ## Основные переменные окружения
 
 - `MAX_BOT_TOKEN` — токен бота MAX (используется в `Authorization` header).
@@ -27,3 +37,8 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - Бизнес-логика смен, машин, услуг, комбо, календаря, истории, профиля, FAQ и админки сохранена.
 - Reply UX переведён на MAX inline keyboard (кнопки типа `message`/`callback`/`link`).
 - Для медиа используется upload flow MAX (`/uploads`) и attachments в `/messages`.
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
+- Callback payload поддерживает несколько форматов (`callback.payload`, `callback.data`, `callback.button.payload`).
+- Если MAX не поддерживает прямой аналог операций (например, copy/pin/unpin), используется явный fallback с логированием.
+=======
+>>>>>>> main

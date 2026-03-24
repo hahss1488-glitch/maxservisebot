@@ -515,6 +515,10 @@ def resolve_user_access(telegram_id: int, context: CallbackContext | None = None
     return db_user, False, subscription_active
 
 
+def get_user_platform_id(row: dict) -> int:
+    return int(row.get("max_user_id") or row.get("telegram_id") or 0)
+
+
 def main_menu_for_db_user(db_user: dict | None, subscription_active: bool | None = None) -> ReplyKeyboardMarkup:
     active_shift = DatabaseManager.get_active_shift(db_user['id']) if db_user else None
     has_active_shift = bool(active_shift)
@@ -2911,8 +2915,9 @@ async def admin_user_card(query, context, data):
         [InlineKeyboardButton("🚫 Отключить подписку", callback_data=f"admin_disable_subscription_{user_id}")],
         [InlineKeyboardButton("🔙 Назад", callback_data=back_callback)],
     ]
+    platform_user_id = get_user_platform_id(row)
     await query.edit_message_text(
-        f"👤 {row['name']}\nTelegram ID: {row['telegram_id']}\n"
+        f"👤 {row['name']}\nMAX User ID: {platform_user_id}\n"
         f"Смен: {row['shifts_count']}\nСумма: {format_money(int(row['total_amount'] or 0))}\n"
         f"Статус: {'Заблокирован' if blocked else 'Активен'}\n"
         f"Лидерборд: {'Учитывается' if include_in_leaderboard else 'Не учитывается'}\n"
@@ -5716,6 +5721,84 @@ async def ensure_startup_once() -> None:
 
 
 def _resolve_chat_id(message_payload: dict[str, Any]) -> int:
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
+    _, target_id = resolve_response_target(message_payload)
+    return int(target_id)
+
+
+def resolve_response_target(message_payload: dict[str, Any]) -> tuple[str, int]:
+    """Resolve explicit response target for MAX updates.
+
+    Rules:
+    1) If event is from chat/channel context and recipient.chat_id exists -> answer to chat_id.
+    2) For direct user messages, prefer sender.user_id.
+    3) Fallback to recipient.user_id only when sender is missing.
+    """
+    recipient = message_payload.get("recipient") or {}
+    sender = message_payload.get("sender") or {}
+
+    chat_id = recipient.get("chat_id")
+    if chat_id:
+        return "chat", int(chat_id)
+
+    sender_user_id = sender.get("user_id")
+    if sender_user_id:
+        return "user", int(sender_user_id)
+
+    recipient_user_id = recipient.get("user_id")
+    if recipient_user_id:
+        return "user", int(recipient_user_id)
+
+    return "user", 0
+
+
+def _build_update_from_max(payload: dict[str, Any]) -> Update:
+    update_type = str(payload.get("update_type") or "")
+    message_payload = payload.get("message") or {}
+    sender = message_payload.get("sender") or {}
+    user_id = int(sender.get("user_id") or 0)
+    user = MaxUser(
+        user_id=user_id,
+        first_name=str(sender.get("first_name") or sender.get("name") or ""),
+        last_name=str(sender.get("last_name") or ""),
+        username=str(sender.get("username") or ""),
+    )
+    target_type, target_id = resolve_response_target(message_payload)
+    chat_id = target_id
+    chat = MaxChat(chat_id, target_type=target_type)
+    body = message_payload.get("body") or {}
+    text = str(body.get("text") or "")
+    attachments = body.get("attachments") or []
+    message = MaxIncomingMessage(
+        bot=_MAX_BOT,
+        message_id=int(message_payload.get("message_id") or 0),
+        chat_id=chat_id,
+        from_user=user,
+        text=text,
+        attachments=attachments,
+        target_type=target_type,
+    )
+
+    if update_type == "message_callback":
+        callback = payload.get("callback") or {}
+        callback_payload = str(
+            callback.get("payload")
+            or callback.get("data")
+            or (callback.get("button") or {}).get("payload")
+            or (callback.get("button") or {}).get("data")
+            or ""
+        )
+        callback_id = str(callback.get("callback_id") or "")
+        query = MaxCallbackQuery(
+            bot=_MAX_BOT,
+            from_user=user,
+            message=message,
+            data=callback_payload,
+            callback_id=callback_id,
+        )
+        return Update(effective_user=user, effective_chat=chat, callback_query=query)
+
+=======
     recipient = message_payload.get("recipient") or {}
     sender = message_payload.get("sender") or {}
     chat_id = recipient.get("chat_id") or recipient.get("user_id") or sender.get("user_id") or 0
@@ -5760,12 +5843,19 @@ def _build_update_from_max(payload: dict[str, Any]) -> Update:
         )
         return Update(effective_user=user, effective_chat=chat, callback_query=query)
 
+>>>>>>> main
     return Update(effective_user=user, effective_chat=chat, message=message)
 
 
 async def process_max_update(payload: dict[str, Any]) -> None:
     await ensure_startup_once()
     update = _build_update_from_max(payload)
+<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
+    if not update.effective_chat or int(update.effective_chat.id or 0) <= 0:
+        logger.warning("skip update without response target update_type=%s", payload.get("update_type"))
+        return
+=======
+>>>>>>> main
     user_id = int(update.effective_user.id if update.effective_user else 0)
     user_data = state_manager.get_user_state(user_id) if user_id else {}
     context = CallbackContext(bot=_MAX_BOT, application=_MAX_APP, user_data=user_data)

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
-from threading import RLock
-from typing import Any
 import json
 import logging
+from threading import RLock
+from typing import Any
 
 from database import DatabaseManager
 
@@ -53,17 +52,11 @@ class PersistentUserState(dict):
 
 def _is_persisted_key(key: str) -> bool:
     return any(key == p or key.startswith(p) for p in PERSISTED_PREFIXES)
-=======
-from collections import defaultdict
-from threading import RLock
-from typing import Any
->>>>>>> main
 
 
 class StateManager:
     def __init__(self):
         self._lock = RLock()
-<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
         self._store: dict[int, PersistentUserState] = {}
 
     def get_user_state(self, user_id: int) -> PersistentUserState:
@@ -90,17 +83,6 @@ class StateManager:
             uid = int(user_id)
             self._store.pop(uid, None)
             DatabaseManager.set_app_content(f"runtime_state:{uid}", "")
-=======
-        self._store: dict[int, dict[str, Any]] = defaultdict(dict)
-
-    def get_user_state(self, user_id: int) -> dict[str, Any]:
-        with self._lock:
-            return self._store[int(user_id)]
-
-    def clear_user_state(self, user_id: int) -> None:
-        with self._lock:
-            self._store.pop(int(user_id), None)
->>>>>>> main
 
 
 state_manager = StateManager()

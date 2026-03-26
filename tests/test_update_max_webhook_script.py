@@ -27,6 +27,21 @@ def test_resolve_webhook_url_from_base(monkeypatch):
     assert script.resolve_webhook_url() == "https://abc.tunnel.dev/max/webhook"
 
 
+def test_resolve_webhook_url_from_current_tunnel_file(monkeypatch, tmp_path):
+    tunnel_file = tmp_path / "current_tunnel_url.txt"
+    tunnel_file.write_text("https://from-file.tunnel.dev\n", encoding="utf-8")
+
+    monkeypatch.delenv("MAX_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("MAX_TUNNEL_URL", raising=False)
+    monkeypatch.delenv("TUNNEL_URL", raising=False)
+    monkeypatch.delenv("WEBHOOK_BASE_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setenv("CURRENT_TUNNEL_URL_FILE", str(tunnel_file))
+
+    assert script.resolve_webhook_url() == "https://from-file.tunnel.dev/max/webhook"
+
+
 def test_main_deletes_all_and_creates_one(monkeypatch):
     calls = {"delete_urls": [], "create_payload": None}
 
@@ -78,3 +93,27 @@ def test_main_continues_when_delete_fails(monkeypatch):
 
     assert script.main() == 0
     assert calls["created"] == 1
+
+
+def test_main_deletes_nested_subscription_urls(monkeypatch):
+    calls = {"deleted": []}
+
+    monkeypatch.setenv("MAX_BOT_TOKEN", "token")
+    monkeypatch.setenv("MAX_WEBHOOK_URL", "https://new.example/max/webhook")
+
+    def fake_get(url, headers, timeout):
+        return DummyResponse(payload={"subscriptions": [{"subscription": {"url": "https://old-nested/max/webhook"}}]})
+
+    def fake_delete(url, headers, params, timeout):
+        calls["deleted"].append(params["url"])
+        return DummyResponse(status_code=200)
+
+    def fake_post(url, headers, json, timeout):
+        return DummyResponse(status_code=200)
+
+    monkeypatch.setattr(script.requests, "get", fake_get)
+    monkeypatch.setattr(script.requests, "delete", fake_delete)
+    monkeypatch.setattr(script.requests, "post", fake_post)
+
+    assert script.main() == 0
+    assert calls["deleted"] == ["https://old-nested/max/webhook"]

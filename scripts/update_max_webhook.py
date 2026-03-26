@@ -31,6 +31,13 @@ def resolve_webhook_url() -> str:
 
     base_url = _get_env_first("MAX_TUNNEL_URL", "TUNNEL_URL", "WEBHOOK_BASE_URL", "PUBLIC_BASE_URL")
     if not base_url:
+        tunnel_file = _get_env_first("CURRENT_TUNNEL_URL_FILE") or "current_tunnel_url.txt"
+        try:
+            if os.path.exists(tunnel_file):
+                base_url = (open(tunnel_file, "r", encoding="utf-8").read() or "").strip()
+        except OSError as exc:
+            logger.warning("Failed to read tunnel URL file=%s error=%s", tunnel_file, exc)
+    if not base_url:
         return ""
 
     return f"{base_url.rstrip('/')}/max/webhook"
@@ -54,6 +61,40 @@ def _extract_subscriptions(payload: Any) -> list[dict[str, Any]]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _extract_subscription_urls(subscriptions: list[dict[str, Any]]) -> list[str]:
+    urls: list[str] = []
+    for item in subscriptions:
+        candidate_keys = ("url", "webhook_url", "callback_url", "endpoint")
+        sub_url = ""
+        for key in candidate_keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                sub_url = value.strip()
+                break
+
+        if not sub_url:
+            nested = item.get("subscription")
+            if isinstance(nested, dict):
+                for key in candidate_keys:
+                    value = nested.get(key)
+                    if isinstance(value, str) and value.strip():
+                        sub_url = value.strip()
+                        break
+
+        if sub_url:
+            urls.append(sub_url)
+
+    # сохраняем порядок и убираем дубли
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
 
 
 def fetch_current_subscriptions(api_base: str, token: str, timeout: int) -> list[dict[str, Any]]:
@@ -122,10 +163,13 @@ def main() -> int:
 
     deleted = 0
     failed = 0
-    for item in current:
-        existing_url = str(item.get("url") or "").strip()
-        if not existing_url:
-            continue
+    existing_urls = _extract_subscription_urls(current)
+    if existing_urls:
+        logger.info("Found old subscriptions: %s", ", ".join(existing_urls))
+    else:
+        logger.info("No old subscriptions found")
+
+    for existing_url in existing_urls:
         if delete_subscription(api_base, token, existing_url, timeout):
             deleted += 1
         else:

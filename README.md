@@ -18,16 +18,21 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 
 ### Автообновление webhook (рекомендуется для туннелей)
 
-Если туннельный URL меняется (например, после перезапуска), можно запускать:
+Если туннельный URL меняется (например, после перезапуска), используйте единый entrypoint:
 
 ```bash
-python scripts/update_max_webhook.py
+bash scripts/run_tunnel_and_update_webhook.sh
 ```
 
 Скрипт:
+- при необходимости запускает туннель (`TUNNEL_START_CMD`),
+- извлекает актуальный публичный URL (из `MAX_TUNNEL_URL`/`TUNNEL_URL`/`...` или `TUNNEL_STATUS_URL`),
+- сохраняет URL в `CURRENT_TUNNEL_URL_FILE` (по умолчанию `current_tunnel_url.txt`),
+- запускает `scripts/update_max_webhook.py`, который:
 - получает текущие подписки (`GET /subscriptions`),
 - удаляет старые (`DELETE /subscriptions?url=...`),
-- создаёт одну новую подписку на текущий URL (`POST /subscriptions`).
+- создаёт одну новую подписку на текущий URL (`POST /subscriptions`),
+- проверяет, что осталась ровно одна активная подписка.
 
 ## Основные переменные окружения
 

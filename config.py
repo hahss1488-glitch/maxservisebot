@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-BOT_TOKEN = os.getenv("SERVICEBOT_TOKEN", "")
+BOT_TOKEN = os.getenv("MAX_BOT_TOKEN", os.getenv("SERVICEBOT_TOKEN", ""))
 
 BASE_DIR = Path(__file__).resolve().parent
 DASHBOARD_TEMPLATE_PATH = BASE_DIR / "ui" / "assets" / "dashboard" / "dashboard_template_v2.png"
@@ -120,8 +120,8 @@ def validate_car_number(text: str) -> tuple[bool, str, str]:
     if len(normalized) < 6:
         return False, normalized, f"Номер слишком короткий: {normalized}"
 
-    pattern_full = f'^[{RUS_LETTERS}]\d{{3}}[{RUS_LETTERS}]{{2}}\d{{3}}$'
-    pattern_short = f'^[{RUS_LETTERS}]\d{{3}}[{RUS_LETTERS}]{{2}}$'
+    pattern_full = f'^[{RUS_LETTERS}]\\d{{3}}[{RUS_LETTERS}]{{2}}\\d{{3}}$'
+    pattern_short = f'^[{RUS_LETTERS}]\\d{{3}}[{RUS_LETTERS}]{{2}}$'
 
     if re.match(pattern_short, normalized):
         return True, normalized + DEFAULT_REGION, ""
@@ -210,38 +210,3 @@ def get_allowed_letters_explained() -> str:
         text += f"• {letter} - {description}\n"
     
     return text
-
-# ========== ПРИМЕРЫ ИСПОЛЬЗОВАНИЯ ==========
-
-if __name__ == "__main__":
-    # Тестирование функции нормализации
-    test_cases = [
-        "x340py",
-        "х340ру",
-        "H340PY797",
-        "а123вс",
-        "b567tx",
-        "e234km",
-        "X340PY",
-        "h340py",
-        "y123ab",
-        "А123ВС777",
-        "Х340РУ",
-        "В567 ТХ-799",  # С пробелом и дефисом
-        "о234 ср 797",  # С пробелами
-    ]
-    
-    print("🧪 Тестирование нормализации номеров:")
-    print("=" * 50)
-    
-    for test in test_cases:
-        normalized = normalize_car_number(test)
-        is_valid, final_number, error = validate_car_number(test)
-        
-        print(f"Ввод: '{test}'")
-        print(f"  Нормализовано: {normalized}")
-        print(f"  Валидность: {'✅' if is_valid else '❌'}")
-        print(f"  Финальный номер: {final_number}")
-        if error:
-            print(f"  Ошибка: {error}")
-        print()

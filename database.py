@@ -27,6 +27,7 @@ def init_database():
     cur.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id BIGINT UNIQUE NOT NULL,
+        max_user_id BIGINT UNIQUE,
         name TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
@@ -85,6 +86,7 @@ def init_database():
     cur.execute("""CREATE TABLE IF NOT EXISTS banned_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id BIGINT UNIQUE NOT NULL,
+        max_user_id BIGINT UNIQUE,
         name TEXT NOT NULL,
         banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         reason TEXT DEFAULT ''
@@ -179,6 +181,21 @@ def init_database():
     if "rank_prefix" not in settings_columns:
         cur.execute("ALTER TABLE user_settings ADD COLUMN rank_prefix TEXT DEFAULT ''")
 
+    cur.execute("PRAGMA table_info(users)")
+    user_columns = {row[1] for row in cur.fetchall()}
+    if "max_user_id" not in user_columns:
+        cur.execute("ALTER TABLE users ADD COLUMN max_user_id BIGINT")
+    cur.execute("UPDATE users SET max_user_id = telegram_id WHERE max_user_id IS NULL")
+
+    cur.execute("PRAGMA table_info(banned_users)")
+    banned_columns = {row[1] for row in cur.fetchall()}
+    if "max_user_id" not in banned_columns:
+        cur.execute("ALTER TABLE banned_users ADD COLUMN max_user_id BIGINT")
+    cur.execute("UPDATE banned_users SET max_user_id = telegram_id WHERE max_user_id IS NULL")
+
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_max_user_id ON users(max_user_id)")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_banned_max_user_id ON banned_users(max_user_id)")
+
     cur.execute("CREATE INDEX IF NOT EXISTS idx_shifts_user_status_start ON shifts(user_id, status, start_time)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_shifts_work_date_user ON shifts(work_date, user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_cars_shift_id ON cars(shift_id)")
@@ -188,26 +205,25 @@ def init_database():
 
     conn.commit()
     conn.close()
-    print("✅ База данных создана")
 
 class DatabaseManager:
     # ========== ПОЛЬЗОВАТЕЛИ ==========
     @staticmethod
-    def get_user(telegram_id: int) -> Optional[Dict]:
+    def get_user(max_user_id: int) -> Optional[Dict]:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
+        cur.execute("SELECT * FROM users WHERE max_user_id = ? OR telegram_id = ?", (max_user_id, max_user_id))
         row = cur.fetchone()
         conn.close()
         return dict(row) if row else None
 
     @staticmethod
-    def register_user(telegram_id: int, name: str):
+    def register_user(max_user_id: int, name: str):
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
-            "INSERT OR IGNORE INTO users (telegram_id, name) VALUES (?, ?)",
-            (telegram_id, name)
+            "INSERT OR IGNORE INTO users (telegram_id, max_user_id, name) VALUES (?, ?, ?)",
+            (max_user_id, max_user_id, name)
         )
         conn.commit()
         conn.close()
@@ -268,7 +284,7 @@ class DatabaseManager:
     def is_telegram_banned(telegram_id: int) -> bool:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT 1 FROM banned_users WHERE telegram_id = ?", (telegram_id,))
+        cur.execute("SELECT 1 FROM banned_users WHERE max_user_id = ? OR telegram_id = ?", (telegram_id, telegram_id))
         row = cur.fetchone()
         conn.close()
         return bool(row)
@@ -290,7 +306,7 @@ class DatabaseManager:
     def unban_telegram_user(telegram_id: int) -> None:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM banned_users WHERE telegram_id = ?", (telegram_id,))
+        cur.execute("DELETE FROM banned_users WHERE max_user_id = ? OR telegram_id = ?", (telegram_id, telegram_id))
         conn.commit()
         conn.close()
 
@@ -309,13 +325,13 @@ class DatabaseManager:
         name = str(row["name"] or "Пользователь")
 
         cur.execute(
-            """INSERT INTO banned_users (telegram_id, name, reason)
-            VALUES (?, ?, ?)
-            ON CONFLICT(telegram_id) DO UPDATE SET
-                name = excluded.name,
-                reason = excluded.reason,
-                banned_at = CURRENT_TIMESTAMP""",
-            (telegram_id, name, reason),
+            """INSERT INTO banned_users (telegram_id, max_user_id, name, reason)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(max_user_id) DO UPDATE SET
+            name = excluded.name,
+            reason = excluded.reason,
+            banned_at = CURRENT_TIMESTAMP""",
+            (telegram_id, telegram_id, name, reason),
         )
 
         cur.execute(
@@ -1867,4 +1883,3 @@ class DatabaseManager:
 
 if __name__ == "__main__":
     init_database()
-    print("База данных готова")

@@ -4,9 +4,9 @@ import asyncio
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Bot
 
 AVATAR_CACHE_DIR = Path("cache/avatars")
 AVATAR_TTL_DAYS = 7
@@ -42,7 +42,7 @@ def _crop_square(image: Image.Image) -> Image.Image:
     return image.crop(((w-s)//2, (h-s)//2, (w+s)//2, (h+s)//2))
 
 
-async def fetch_avatar_bytes(bot: Bot, user_id: int) -> bytes | None:
+async def fetch_avatar_bytes(bot: Any, user_id: int) -> bytes | None:
     try:
         async with _semaphore:
             photos = await asyncio.wait_for(bot.get_user_profile_photos(user_id=user_id, limit=1), timeout=DOWNLOAD_TIMEOUT)
@@ -56,7 +56,7 @@ async def fetch_avatar_bytes(bot: Bot, user_id: int) -> bytes | None:
         return None
 
 
-async def get_avatar_image(bot: Bot, user_id: int, size: int, fallback_name: str = "") -> Image.Image:
+async def get_avatar_image(bot: Any, user_id: int, size: int, fallback_name: str = "") -> Image.Image:
     AVATAR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache = AVATAR_CACHE_DIR / f"{int(user_id)}.jpg"
     initials = "".join(p[:1] for p in fallback_name.split()[:2]).upper() or "?"

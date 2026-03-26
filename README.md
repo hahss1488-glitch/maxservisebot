@@ -36,3 +36,5 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - Для медиа используется upload flow MAX (`/uploads`) и attachments в `/messages`.
 - Callback payload поддерживает несколько форматов (`callback.payload`, `callback.data`, `callback.button.payload`).
 - Если MAX не поддерживает прямой аналог операций (например, copy/pin/unpin), используется явный fallback с логированием.
+
+_Repo sync: recreated PR after CI issue._

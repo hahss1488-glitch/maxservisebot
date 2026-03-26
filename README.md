@@ -9,7 +9,6 @@ pip install -r requirements.txt
 uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
 ## Регистрация webhook в MAX
 
 1. Поднимите публичный HTTPS endpoint (`https://<host>/max/webhook`).
@@ -17,13 +16,26 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 3. Передайте `secret` и установите тот же `MAX_WEBHOOK_SECRET` в env.
 4. Входящие запросы валидируются по заголовку `X-Max-Bot-Api-Secret`.
 
-=======
->>>>>>> main
+### Автообновление webhook (рекомендуется для туннелей)
+
+Если туннельный URL меняется (например, после перезапуска), можно запускать:
+
+```bash
+python scripts/update_max_webhook.py
+```
+
+Скрипт:
+- получает текущие подписки (`GET /subscriptions`),
+- удаляет старые (`DELETE /subscriptions?url=...`),
+- создаёт одну новую подписку на текущий URL (`POST /subscriptions`).
+
 ## Основные переменные окружения
 
 - `MAX_BOT_TOKEN` — токен бота MAX (используется в `Authorization` header).
 - `MAX_API_BASE` — базовый URL API (по умолчанию `https://platform-api.max.ru`).
 - `MAX_WEBHOOK_SECRET` — секрет webhook, сравнивается с заголовком `X-Max-Bot-Api-Secret`.
+- `MAX_WEBHOOK_URL` / `WEBHOOK_URL` — полный URL webhook (например, `https://.../max/webhook`).
+- `MAX_TUNNEL_URL` / `TUNNEL_URL` / `WEBHOOK_BASE_URL` / `PUBLIC_BASE_URL` — базовый URL туннеля, если полный `.../max/webhook` не передаётся.
 - `DEVICE_KEY` — ключ доступа для `POST /api/task` (опционально).
 - `NOTIFY_MAX` — `1/0`, отправлять ли уведомления в MAX из `api.py`.
 
@@ -37,8 +49,5 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - Бизнес-логика смен, машин, услуг, комбо, календаря, истории, профиля, FAQ и админки сохранена.
 - Reply UX переведён на MAX inline keyboard (кнопки типа `message`/`callback`/`link`).
 - Для медиа используется upload flow MAX (`/uploads`) и attachments в `/messages`.
-<<<<<<< codex/create-technical-specification-for-max-migration-meyrbj
 - Callback payload поддерживает несколько форматов (`callback.payload`, `callback.data`, `callback.button.payload`).
 - Если MAX не поддерживает прямой аналог операций (например, copy/pin/unpin), используется явный fallback с логированием.
-=======
->>>>>>> main

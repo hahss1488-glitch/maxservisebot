@@ -2,11 +2,16 @@ import logging
 import os
 import re
 import asyncio
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
+
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=False)
+load_dotenv(override=False)
 
 from config import BOT_TOKEN, SERVICES
 from database import DatabaseManager, get_connection, init_database

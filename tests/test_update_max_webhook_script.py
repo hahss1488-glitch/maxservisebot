@@ -17,17 +17,16 @@ class DummyResponse:
 
 def test_resolve_webhook_url_from_full(monkeypatch):
     monkeypatch.setenv("MAX_WEBHOOK_URL", "https://example.com/max/webhook")
-    assert script.resolve_webhook_url() == "https://example.com/max/webhook"
+    assert script.resolve_webhook_url("https://ignored.example") == "https://example.com/max/webhook"
 
 
 def test_resolve_webhook_url_from_base(monkeypatch):
     monkeypatch.delenv("MAX_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("WEBHOOK_URL", raising=False)
-    monkeypatch.setenv("MAX_TUNNEL_URL", "https://abc.tunnel.dev/")
-    assert script.resolve_webhook_url() == "https://abc.tunnel.dev/max/webhook"
+    assert script.resolve_webhook_url("https://abc.tunnel.dev/") == "https://abc.tunnel.dev/max/webhook"
 
 
-def test_resolve_webhook_url_from_current_tunnel_file(monkeypatch, tmp_path):
+def test_resolve_tunnel_base_url_from_current_tunnel_file(monkeypatch, tmp_path):
     tunnel_file = tmp_path / "current_tunnel_url.txt"
     tunnel_file.write_text("https://from-file.tunnel.dev\n", encoding="utf-8")
 
@@ -39,7 +38,7 @@ def test_resolve_webhook_url_from_current_tunnel_file(monkeypatch, tmp_path):
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     monkeypatch.setenv("CURRENT_TUNNEL_URL_FILE", str(tunnel_file))
 
-    assert script.resolve_webhook_url() == "https://from-file.tunnel.dev/max/webhook"
+    assert script.resolve_tunnel_base_url(timeout=1) == "https://from-file.tunnel.dev"
 
 
 def test_main_deletes_all_and_creates_one(monkeypatch):
@@ -50,9 +49,15 @@ def test_main_deletes_all_and_creates_one(monkeypatch):
     monkeypatch.setenv("MAX_API_BASE", "https://platform-api.max.ru")
     monkeypatch.setenv("MAX_WEBHOOK_SECRET", "secret-x")
 
+    get_calls = {"count": 0}
+
     def fake_get(url, headers, timeout):
         assert url.endswith("/subscriptions")
-        return DummyResponse(payload=[{"url": "https://old1/max/webhook"}, {"url": "https://old2/max/webhook"}])
+        get_calls["count"] += 1
+        assert headers["Authorization"] == "token"
+        if get_calls["count"] == 1:
+            return DummyResponse(payload=[{"url": "https://old1/max/webhook"}, {"url": "https://old2/max/webhook"}])
+        return DummyResponse(payload=[{"url": "https://new.example/max/webhook"}])
 
     def fake_delete(url, headers, params, timeout):
         calls["delete_urls"].append(params["url"])
@@ -91,8 +96,8 @@ def test_main_continues_when_delete_fails(monkeypatch):
     monkeypatch.setattr(script.requests, "delete", fake_delete)
     monkeypatch.setattr(script.requests, "post", fake_post)
 
-    assert script.main() == 0
-    assert calls["created"] == 1
+    assert script.main() == 1
+    assert calls["created"] == 0
 
 
 def test_main_deletes_nested_subscription_urls(monkeypatch):
@@ -101,8 +106,13 @@ def test_main_deletes_nested_subscription_urls(monkeypatch):
     monkeypatch.setenv("MAX_BOT_TOKEN", "token")
     monkeypatch.setenv("MAX_WEBHOOK_URL", "https://new.example/max/webhook")
 
+    get_calls = {"count": 0}
+
     def fake_get(url, headers, timeout):
-        return DummyResponse(payload={"subscriptions": [{"subscription": {"url": "https://old-nested/max/webhook"}}]})
+        get_calls["count"] += 1
+        if get_calls["count"] == 1:
+            return DummyResponse(payload={"subscriptions": [{"subscription": {"url": "https://old-nested/max/webhook"}}]})
+        return DummyResponse(payload={"subscriptions": [{"url": "https://new.example/max/webhook"}]})
 
     def fake_delete(url, headers, params, timeout):
         calls["deleted"].append(params["url"])
@@ -117,3 +127,31 @@ def test_main_deletes_nested_subscription_urls(monkeypatch):
 
     assert script.main() == 0
     assert calls["deleted"] == ["https://old-nested/max/webhook"]
+
+
+def test_main_writes_current_tunnel_url_file(monkeypatch, tmp_path):
+    tunnel_file = tmp_path / "current_tunnel_url.txt"
+    monkeypatch.setenv("MAX_BOT_TOKEN", "token")
+    monkeypatch.setenv("MAX_TUNNEL_URL", "https://new.tunnel.example")
+    monkeypatch.setenv("CURRENT_TUNNEL_URL_FILE", str(tunnel_file))
+
+    get_calls = {"count": 0}
+
+    def fake_get(url, headers, timeout):
+        get_calls["count"] += 1
+        if get_calls["count"] == 1:
+            return DummyResponse(payload=[])
+        return DummyResponse(payload=[{"url": "https://new.tunnel.example/max/webhook"}])
+
+    def fake_delete(url, headers, params, timeout):
+        raise AssertionError("delete should not be called")
+
+    def fake_post(url, headers, json, timeout):
+        return DummyResponse(status_code=200)
+
+    monkeypatch.setattr(script.requests, "get", fake_get)
+    monkeypatch.setattr(script.requests, "delete", fake_delete)
+    monkeypatch.setattr(script.requests, "post", fake_post)
+
+    assert script.main() == 0
+    assert tunnel_file.read_text(encoding="utf-8").strip() == "https://new.tunnel.example"

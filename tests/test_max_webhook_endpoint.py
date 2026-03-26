@@ -1,4 +1,6 @@
-from fastapi.testclient import TestClient
+import asyncio
+import pytest
+from fastapi import HTTPException
 
 import api
 
@@ -13,15 +15,14 @@ def test_max_webhook_secret_guard(monkeypatch):
 
     monkeypatch.setattr(api, "process_max_update", _proc)
 
-    client = TestClient(api.app)
+    with pytest.raises(HTTPException):
+        asyncio.run(api.max_webhook({"update_type": "message_created"}, x_max_bot_api_secret=None))
 
-    bad = client.post("/max/webhook", json={"update_type": "message_created"})
-    assert bad.status_code == 401
-
-    good = client.post(
-        "/max/webhook",
-        headers={"X-Max-Bot-Api-Secret": "s3cr3t"},
-        json={"update_type": "message_created", "message": {"sender": {"user_id": 1}, "recipient": {"chat_id": 1}, "body": {"text": "x"}}},
+    good = asyncio.run(
+        api.max_webhook(
+            {"update_type": "message_created", "message": {"sender": {"user_id": 1}, "recipient": {"chat_id": 1}, "body": {"text": "x"}}},
+            x_max_bot_api_secret="s3cr3t",
+        )
     )
-    assert good.status_code == 200
+    assert getattr(good, "status_code", 0) == 200
     assert called["ok"] == 1

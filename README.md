@@ -18,16 +18,26 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 
 ### Автообновление webhook (рекомендуется для туннелей)
 
-Если туннельный URL меняется (например, после перезапуска), можно запускать:
+Если туннельный URL меняется (например, после перезапуска), используйте единый entrypoint:
 
 ```bash
-python scripts/update_max_webhook.py
+/root/maxservisebot/upmsb
 ```
 
-Скрипт:
+Execution path:
+- `upmsb` — главный entrypoint для ручного запуска/cron/systemd.
+- `scripts/run_tunnel_and_update_webhook.sh` — orchestrator (получает URL туннеля, пишет `current_tunnel_url.txt`).
+- `scripts/update_max_webhook.py` — helper синка MAX subscriptions (GET -> DELETE -> POST -> verify=1).
+
+Workflow:
+- при необходимости запускает туннель (`TUNNEL_START_CMD`),
+- извлекает актуальный публичный URL (из `MAX_TUNNEL_URL`/`TUNNEL_URL`/`...` или `TUNNEL_STATUS_URL`),
+- сохраняет URL в `CURRENT_TUNNEL_URL_FILE` (по умолчанию `/root/maxservisebot/current_tunnel_url.txt`),
+- запускает `scripts/update_max_webhook.py`, который:
 - получает текущие подписки (`GET /subscriptions`),
 - удаляет старые (`DELETE /subscriptions?url=...`),
-- создаёт одну новую подписку на текущий URL (`POST /subscriptions`).
+- создаёт одну новую подписку на текущий URL (`POST /subscriptions`),
+- проверяет, что осталась ровно одна активная подписка.
 
 ## Основные переменные окружения
 
@@ -36,6 +46,8 @@ python scripts/update_max_webhook.py
 - `MAX_WEBHOOK_SECRET` — секрет webhook, сравнивается с заголовком `X-Max-Bot-Api-Secret`.
 - `MAX_WEBHOOK_URL` / `WEBHOOK_URL` — полный URL webhook (например, `https://.../max/webhook`).
 - `MAX_TUNNEL_URL` / `TUNNEL_URL` / `WEBHOOK_BASE_URL` / `PUBLIC_BASE_URL` — базовый URL туннеля, если полный `.../max/webhook` не передаётся.
+- `CURRENT_TUNNEL_URL_FILE` — абсолютный путь до файла с последним tunnel URL (по умолчанию `/root/maxservisebot/current_tunnel_url.txt`).
+- `MAXSERVISEBOT_HOME` — корень проекта на сервере (по умолчанию `/root/maxservisebot`).
 - `DEVICE_KEY` — ключ доступа для `POST /api/task` (опционально).
 - `NOTIFY_MAX` — `1/0`, отправлять ли уведомления в MAX из `api.py`.
 

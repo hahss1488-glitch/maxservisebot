@@ -1,0 +1,16 @@
+[Unit]
+Description=MAXServiceBot tunnel + webhook sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/maxservisebot
+Environment=MAXSERVISEBOT_HOME=/root/maxservisebot
+ExecStart=/root/maxservisebot/upmsb
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

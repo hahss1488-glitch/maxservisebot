@@ -13,9 +13,14 @@ fail() {
 MAX_API_BASE="${MAX_API_BASE:-https://platform-api.max.ru}"
 MAX_BOT_TOKEN="${MAX_BOT_TOKEN:-}"
 MAX_WEBHOOK_SECRET="${MAX_WEBHOOK_SECRET:-}"
-CURRENT_TUNNEL_URL_FILE="${CURRENT_TUNNEL_URL_FILE:-current_tunnel_url.txt}"
+MAXSERVISEBOT_HOME="${MAXSERVISEBOT_HOME:-/root/maxservisebot}"
+CURRENT_TUNNEL_URL_FILE="${CURRENT_TUNNEL_URL_FILE:-$MAXSERVISEBOT_HOME/current_tunnel_url.txt}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 [ -n "$MAX_BOT_TOKEN" ] || fail "MAX_BOT_TOKEN is required"
+log "Webhook orchestrator entrypoint started: $0"
+log "Working directory: $(pwd)"
+log "Using CURRENT_TUNNEL_URL_FILE=$CURRENT_TUNNEL_URL_FILE"
 
 if [ -n "${TUNNEL_START_CMD:-}" ]; then
   log "Starting tunnel with TUNNEL_START_CMD"
@@ -82,6 +87,6 @@ mkdir -p "$(dirname "$CURRENT_TUNNEL_URL_FILE")"
 printf '%s\n' "$TUNNEL_BASE_URL" > "$CURRENT_TUNNEL_URL_FILE"
 log "Saved current tunnel URL to $CURRENT_TUNNEL_URL_FILE: $TUNNEL_BASE_URL"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export MAX_TUNNEL_URL="$TUNNEL_BASE_URL"
+log "Delegating webhook sync to $SCRIPT_DIR/update_max_webhook.py"
 python "$SCRIPT_DIR/update_max_webhook.py"

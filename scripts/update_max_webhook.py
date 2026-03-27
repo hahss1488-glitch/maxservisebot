@@ -26,7 +26,11 @@ def _get_env_first(*keys: str) -> str:
 
 
 def _current_tunnel_file_path() -> str:
-    return (_get_env_first("CURRENT_TUNNEL_URL_FILE") or "current_tunnel_url.txt").strip()
+    explicit = _get_env_first("CURRENT_TUNNEL_URL_FILE")
+    if explicit:
+        return explicit
+    home_dir = _get_env_first("MAXSERVISEBOT_HOME") or "/root/maxservisebot"
+    return os.path.join(home_dir, "current_tunnel_url.txt")
 
 
 def _extract_possible_url(payload: Any) -> str:
@@ -164,6 +168,9 @@ def _extract_subscription_urls(subscriptions: list[dict[str, Any]]) -> list[str]
 def fetch_current_subscriptions(api_base: str, token: str, timeout: int) -> list[dict[str, Any]]:
     url = f"{api_base}/subscriptions"
     response = requests.get(url, headers=_headers(token), timeout=timeout)
+    logger.info("MAX API GET %s -> status=%s", url, response.status_code)
+    if response.text:
+        logger.info("MAX API GET body=%s", response.text[:1000])
     response.raise_for_status()
     items = _extract_subscriptions(response.json())
     logger.info("Fetched %s existing subscription(s)", len(items))
@@ -174,6 +181,9 @@ def delete_subscription(api_base: str, token: str, sub_url: str, timeout: int) -
     url = f"{api_base}/subscriptions"
     try:
         response = requests.delete(url, headers=_headers(token), params={"url": sub_url}, timeout=timeout)
+        logger.info("MAX API DELETE %s params=%s -> status=%s", url, {"url": sub_url}, response.status_code)
+        if response.text:
+            logger.info("MAX API DELETE body=%s", response.text[:1000])
         if response.status_code == 404:
             logger.info("Subscription url=%s already absent (404)", sub_url)
             return True
@@ -199,6 +209,9 @@ def create_subscription(api_base: str, token: str, webhook_url: str, secret: str
         payload["secret"] = secret
 
     response = requests.post(url, headers=_headers(token), json=payload, timeout=timeout)
+    logger.info("MAX API POST %s payload=%s -> status=%s", url, payload, response.status_code)
+    if response.text:
+        logger.info("MAX API POST body=%s", response.text[:1000])
     response.raise_for_status()
     logger.info("Created new subscription url=%s", webhook_url)
 
@@ -213,6 +226,8 @@ def main() -> int:
     if not token:
         logger.error("MAX_BOT_TOKEN is empty")
         return 2
+    logger.info("Webhook sync helper started: script=%s cwd=%s", __file__, os.getcwd())
+    logger.info("Using CURRENT_TUNNEL_URL_FILE=%s", _current_tunnel_file_path())
     if tunnel_start_cmd:
         logger.info("Starting tunnel with TUNNEL_START_CMD")
         try:
@@ -231,6 +246,8 @@ def main() -> int:
         return 2
     if base_url:
         persist_tunnel_url(base_url)
+    logger.info("Resolved tunnel base url=%s", base_url)
+    logger.info("Resolved webhook url=%s", webhook_url)
 
     logger.info("Syncing MAX webhook subscriptions for url=%s", webhook_url)
 

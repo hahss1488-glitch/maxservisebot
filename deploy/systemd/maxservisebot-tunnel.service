@@ -1,0 +1,18 @@
+[Unit]
+Description=MAXServiceBot tunnel + webhook sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/maxservisebot
+EnvironmentFile=-/root/maxservisebot/.env
+Environment=MAXSERVISEBOT_HOME=/root/maxservisebot
+Environment=CURRENT_TUNNEL_URL_FILE=/root/maxservisebot/current_tunnel_url.txt
+ExecStart=/usr/bin/bash /root/maxservisebot/scripts/run_tunnel_and_update_webhook.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

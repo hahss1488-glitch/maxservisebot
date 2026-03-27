@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() {
+  printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+fail() {
+  log "ERROR: $*"
+  exit 1
+}
+
+MAXSERVISEBOT_HOME="${MAXSERVISEBOT_HOME:-/root/maxservisebot}"
+CURRENT_TUNNEL_URL_FILE="${CURRENT_TUNNEL_URL_FILE:-$MAXSERVISEBOT_HOME/current_tunnel_url.txt}"
+MAX_API_BASE="${MAX_API_BASE:-https://platform-api.max.ru}"
+UPMSB_LOCK_FILE="${UPMSB_LOCK_FILE:-/tmp/maxservisebot-upmsb.lock}"
+BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-maxservisebot.service}"
+TUNNEL_SERVICE_NAME="${TUNNEL_SERVICE_NAME:-maxservisebot-tunnel.service}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+exec 8>"$UPMSB_LOCK_FILE"
+if ! flock -n 8; then
+  fail "Another upmsb run is already in progress (lock=$UPMSB_LOCK_FILE)"
+fi
+
+export MAXSERVISEBOT_HOME
+export CURRENT_TUNNEL_URL_FILE
+
+log "upmsb started"
+log "MAXSERVISEBOT_HOME=$MAXSERVISEBOT_HOME"
+log "CURRENT_TUNNEL_URL_FILE=$CURRENT_TUNNEL_URL_FILE"
+log "BOT_SERVICE_NAME=$BOT_SERVICE_NAME"
+log "TUNNEL_SERVICE_NAME=$TUNNEL_SERVICE_NAME"
+
+cd "$MAXSERVISEBOT_HOME"
+
+if [ -d .git ]; then
+  log "git pull --ff-only"
+  git pull --ff-only
+else
+  log "WARNING: .git directory not found, skipping git pull"
+fi
+
+if [ -f requirements.txt ]; then
+  log "$PYTHON_BIN -m pip install -r requirements.txt"
+  "$PYTHON_BIN" -m pip install -r requirements.txt
+else
+  log "WARNING: requirements.txt not found, skipping dependency update"
+fi
+
+log "systemctl daemon-reload"
+systemctl daemon-reload
+
+log "systemctl restart $BOT_SERVICE_NAME"
+systemctl restart "$BOT_SERVICE_NAME"
+log "systemctl restart $TUNNEL_SERVICE_NAME"
+systemctl restart "$TUNNEL_SERVICE_NAME"
+
+log "systemctl --no-pager --full status $BOT_SERVICE_NAME"
+systemctl --no-pager --full status "$BOT_SERVICE_NAME" | sed -n '1,12p'
+log "systemctl --no-pager --full status $TUNNEL_SERVICE_NAME"
+systemctl --no-pager --full status "$TUNNEL_SERVICE_NAME" | sed -n '1,12p'
+
+if [ -f "$CURRENT_TUNNEL_URL_FILE" ]; then
+  log "current tunnel url: $(tr -d '\r\n' < "$CURRENT_TUNNEL_URL_FILE")"
+else
+  log "WARNING: current tunnel url file is missing: $CURRENT_TUNNEL_URL_FILE"
+fi
+
+if [ -n "${MAX_BOT_TOKEN:-}" ]; then
+  log "fetching current MAX subscriptions"
+  curl -fsS \
+    -H "Authorization: ${MAX_BOT_TOKEN}" \
+    "${MAX_API_BASE%/}/subscriptions"
+  printf '\n'
+else
+  log "WARNING: MAX_BOT_TOKEN is not set; cannot show subscriptions"
+fi
+
+log "upmsb completed"

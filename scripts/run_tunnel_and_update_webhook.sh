@@ -16,11 +16,17 @@ MAX_WEBHOOK_SECRET="${MAX_WEBHOOK_SECRET:-}"
 MAXSERVISEBOT_HOME="${MAXSERVISEBOT_HOME:-/root/maxservisebot}"
 CURRENT_TUNNEL_URL_FILE="${CURRENT_TUNNEL_URL_FILE:-$MAXSERVISEBOT_HOME/current_tunnel_url.txt}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEBHOOK_SYNC_LOCK_FILE="${WEBHOOK_SYNC_LOCK_FILE:-/tmp/maxservisebot-webhook-sync.lock}"
 
 [ -n "$MAX_BOT_TOKEN" ] || fail "MAX_BOT_TOKEN is required"
+exec 9>"$WEBHOOK_SYNC_LOCK_FILE"
+if ! flock -n 9; then
+  fail "Another tunnel/webhook sync is already running (lock=$WEBHOOK_SYNC_LOCK_FILE)"
+fi
 log "Webhook orchestrator entrypoint started: $0"
 log "Working directory: $(pwd)"
 log "Using CURRENT_TUNNEL_URL_FILE=$CURRENT_TUNNEL_URL_FILE"
+log "Using WEBHOOK_SYNC_LOCK_FILE=$WEBHOOK_SYNC_LOCK_FILE"
 
 if [ -n "${TUNNEL_START_CMD:-}" ]; then
   log "Starting tunnel with TUNNEL_START_CMD"
